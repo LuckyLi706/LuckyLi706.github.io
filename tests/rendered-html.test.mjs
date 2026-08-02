@@ -36,6 +36,8 @@ test("server-renders the public-data research terminal", async () => {
   assert.match(html, /数据管线状态/);
   assert.match(html, /模型训练与自动换模/);
   assert.match(html, /情景推演为研究假设/);
+  assert.match(html, /投研解释模式已开启/);
+  assert.match(html, /先了解数据口径/);
   assert.doesNotMatch(html, /codex-preview/);
 });
 
@@ -52,10 +54,19 @@ test("uses public endpoints and removes fabricated ranking claims", async () => 
   assert.match(page, /push2his\.eastmoney\.com/);
   assert.match(page, /fetch\("\.\/data\/macro\.json"/);
   assert.match(page, /calculateBacktest/);
+  assert.match(page, /const EXPLANATIONS/);
+  assert.match(page, /它是什么/);
+  assert.match(page, /怎么计算或形成/);
+  assert.match(page, /投研时怎么看/);
+  assert.match(page, /常见误区/);
+  assert.match(page, /setExplanationKey\("sharpe"\)/);
+  assert.match(page, /setExplanationKey\(metric\.key\)/);
   assert.doesNotMatch(page, /stock\.base|macroImpulse|runTraining|样本外夏普/);
   assert.match(layout, /免费公开行情/);
   assert.match(css, /\.macro-factor-grid/);
   assert.match(css, /\.live-detail-grid/);
+  assert.match(css, /\.explain-drawer/);
+  assert.match(css, /\.info-button/);
   assert.match(macro, /制造业 PMI/);
   assert.match(workflow, /npm run fetch:data/);
   assert.match(workflow, /schedule:/);

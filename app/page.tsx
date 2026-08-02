@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 type Chain = "all" | "benefit" | "stress";
 
@@ -62,6 +62,277 @@ type BacktestResult = {
   strategyPolygon: string;
   benchmarkPolygon: string;
 };
+
+type Explanation = {
+  group: string;
+  title: string;
+  definition: string;
+  method: string;
+  reading: string;
+  caution: string;
+};
+
+const EXPLANATIONS: Record<string, Explanation> = {
+  "public-data": {
+    group: "数据口径",
+    title: "免费公开数据",
+    definition: "无需付费授权即可访问的市场与宏观数据。本平台读取的是公开最新价和日线，不是交易所逐笔行情。",
+    method: "页面端行情约每 20 秒重新请求；宏观快照由部署任务定时检查，但数值只在官方发布后变化。",
+    reading: "先看页面顶部的行情时间，再判断数据是否足够新。休市时显示最近一个交易时点。",
+    caution: "公开接口可能延迟、中断或更改口径，不能直接替代交易终端。",
+  },
+  "observation-pool": {
+    group: "组合设置",
+    title: "观察组合",
+    definition: "你勾选后用于比较和回测的一组股票，不代表已经买入，也不会产生交易指令。",
+    method: "当前回测把所有已勾选股票等权归一化，并按共同交易日计算组合净值。",
+    reading: "加入或移除股票后，回测会自动重算；观察它对收益、回撤和夏普的影响。",
+    caution: "先看风险暴露与集中度，不能只因为历史收益高就加入。",
+  },
+  conflict: {
+    group: "情景参数",
+    title: "冲突强度",
+    definition: "研究员对军事行动范围、频率和升级风险的主观分级，范围为 1–100。",
+    method: "它与海峡受阻比例、持续时间共同生成情景压力值，只用于梳理传导链。",
+    reading: "数值越高，代表你假设的升级程度越高，不代表事件发生概率。",
+    caution: "这是主观假设，不是新闻事实，也不是模型预测概率。",
+  },
+  hormuz: {
+    group: "情景参数",
+    title: "海峡受阻比例",
+    definition: "假设霍尔木兹海峡正常通航能力受影响的比例。",
+    method: "用 0–100% 表示，平台据此提高油价与运输成本的情景压力。",
+    reading: "47% 表示研究情景假定约四成至五成的通航能力受影响。",
+    caution: "真实影响要结合油轮 AIS、保险费率、运价和库存数据验证。",
+  },
+  duration: {
+    group: "情景参数",
+    title: "冲击持续时间",
+    definition: "假设外生事件对供应链和风险偏好持续产生影响的周数。",
+    method: "时间越长，企业库存、采购合同和资金成本受到影响的可能性越大。",
+    reading: "短期冲击侧重情绪和价格，长期冲击更需要检查盈利预测。",
+    caution: "持续时间不是事件结束日期，只是压力测试窗口。",
+  },
+  "event-pressure": {
+    group: "情景结果",
+    title: "组合压力值",
+    definition: "把三个主观情景参数压缩为 0–100 的相对压力刻度。",
+    method: "冲突强度、受阻比例与持续时间按固定权重合成，便于比较不同情景。",
+    reading: "只适合比较同一套参数下的情景，不应解释为亏损百分比。",
+    caution: "它不是 VaR、回撤预测或事件发生概率。",
+  },
+  "oil-pressure": {
+    group: "情景结果",
+    title: "油价压力",
+    definition: "表示当前假设对油价上行压力的相对强弱，而不是 Brent 目标价。",
+    method: "根据冲突强度、海峡受阻和持续时间计算 0–100 的情景刻度。",
+    reading: "数值上升时，应进一步核验原油期货曲线、库存和航运数据。",
+    caution: "不能把 50/100 解读为油价上涨 50%。",
+  },
+  "manufacturing-pmi": {
+    group: "中国宏观",
+    title: "制造业 PMI",
+    definition: "采购经理对生产、新订单、库存和就业等经营状况的扩散指数。",
+    method: "高于 50 通常表示环比扩张，低于 50 通常表示环比收缩。",
+    reading: "连续变化比单月数值更重要，同时观察新订单与生产分项。",
+    caution: "PMI 是环比景气度调查，不等同于 GDP 同比增速。",
+  },
+  "non-manufacturing-pmi": {
+    group: "中国宏观",
+    title: "非制造业 PMI",
+    definition: "反映服务业和建筑业商务活动的扩散指数。",
+    method: "以 50 为常用荣枯分界，按月公布。",
+    reading: "结合服务业、建筑业分项判断内需与基建景气。",
+    caution: "行业权重不同，不能直接与制造业 PMI 简单平均。",
+  },
+  "cpi-yoy": {
+    group: "中国宏观",
+    title: "CPI 同比",
+    definition: "居民消费价格相对上年同月的变化幅度。",
+    method: "由食品、居住、交通通信等消费类别价格按权重计算。",
+    reading: "用于观察居民端通胀，但应区分食品、能源与核心 CPI。",
+    caution: "同比受基数影响，单月回升不一定意味着需求全面走强。",
+  },
+  "ppi-yoy": {
+    group: "中国宏观",
+    title: "PPI 同比",
+    definition: "工业生产者出厂价格相对上年同月的变化幅度。",
+    method: "覆盖采掘、原材料和加工工业等生产环节。",
+    reading: "上游价格变化可能影响周期行业收入与中下游成本。",
+    caution: "PPI 上升既可能来自需求改善，也可能来自供给冲击。",
+  },
+  "gdp-yoy": {
+    group: "中国宏观",
+    title: "GDP 累计同比",
+    definition: "本年累计国内生产总值相对上年同期的实际增速。",
+    method: "按季度发布，综合生产、收入和支出活动。",
+    reading: "结合消费、投资、出口和行业增加值判断增长来源。",
+    caution: "季度数据频率低，且市场往往已提前交易高频信息。",
+  },
+  "m2-yoy": {
+    group: "中国宏观",
+    title: "广义货币 M2 同比",
+    definition: "流通中货币、企业和居民存款等广义货币余额的同比增速。",
+    method: "按月比较 M2 余额与上年同月余额。",
+    reading: "结合社融、信贷结构和 M1 判断资金是否流向实体活动。",
+    caution: "M2 增速高不等于股票一定上涨，也可能反映存款增加。",
+  },
+  "event-beta": {
+    group: "情景研究",
+    title: "假设事件 β",
+    definition: "股票或行业对特定事件冲击的条件敏感度假设。",
+    method: "正式研究应使用同类历史事件的条件超额收益估计，并做显著性和样本外检验。",
+    reading: "正值表示假设受益，负值表示假设承压；绝对值越大表示敏感度越高。",
+    caution: "当前页面的 β 是研究假设，不是实时统计估计，也不是收益预测。",
+  },
+  price: {
+    group: "行情指标",
+    title: "最新价",
+    definition: "免费公开接口返回的最近成交价格或最近收盘价格。",
+    method: "交易时段内随接口刷新；休市后保持最近交易时点。",
+    reading: "必须与页面顶部时间一起看，确认它代表盘中还是收盘。",
+    caution: "不是交易所逐笔行情，可能延迟，不能用于高频下单。",
+  },
+  change: {
+    group: "行情指标",
+    title: "涨跌幅",
+    definition: "最新价相对上一交易日收盘价的百分比变化。",
+    method: "（最新价 ÷ 前收盘价 − 1）× 100%。",
+    reading: "用于观察当日强弱，最好结合成交额和行业表现。",
+    caution: "单日涨跌不能代表中期趋势。",
+  },
+  turnover: {
+    group: "行情指标",
+    title: "换手率",
+    definition: "一定时间内成交股份占可流通股份的比例。",
+    method: "成交股数 ÷ 流通股本 × 100%。",
+    reading: "高换手说明交易活跃，但要与股票自身历史水平比较。",
+    caution: "高换手既可能是资金流入，也可能是分歧或出货。",
+  },
+  pe: {
+    group: "估值指标",
+    title: "PE（TTM）",
+    definition: "当前总市值相对最近十二个月归母净利润的倍数。",
+    method: "总市值 ÷ 最近十二个月净利润。",
+    reading: "适合与同业、公司历史区间和盈利增速一起比较。",
+    caution: "亏损企业的 PE 可能无意义；周期股盈利高点常出现低 PE。",
+  },
+  pb: {
+    group: "估值指标",
+    title: "PB",
+    definition: "当前总市值相对归母净资产的倍数。",
+    method: "总市值 ÷ 归母股东权益。",
+    reading: "常用于银行、资源和重资产行业，并结合 ROE 判断。",
+    caution: "低 PB 可能反映资产质量、盈利能力或减值风险。",
+  },
+  momentum20: {
+    group: "价格指标",
+    title: "20 日动量",
+    definition: "最新前复权收盘价相对 20 个交易日前的涨跌幅。",
+    method: "（最新收盘价 ÷ 20 个交易日前收盘价 − 1）× 100%。",
+    reading: "正值表示近一个月趋势向上，负值表示趋势偏弱。",
+    caution: "动量会反转，不能单独作为买卖依据。",
+  },
+  open: {
+    group: "行情指标",
+    title: "今开、最高与最低",
+    definition: "当日第一笔成交价、截至当前的最高成交价和最低成交价。",
+    method: "由当日成交记录汇总形成。",
+    reading: "可用于观察跳空、振幅与价格所处的日内位置。",
+    caution: "盘中数值会继续变化，且公开接口可能延迟。",
+  },
+  annualized: {
+    group: "回测指标",
+    title: "组合年化收益",
+    definition: "把整个回测区间的复合收益换算为平均每年的复合增长率。",
+    method: "（期末净值 ÷ 期初净值）^(1/年数) − 1。",
+    reading: "用于比较不同长度区间，但必须同时看最大回撤和样本期。",
+    caution: "年化不是每年都能取得的固定收益。",
+  },
+  benchmark: {
+    group: "回测指标",
+    title: "中证 800 基准",
+    definition: "由沪深 300 与中证 500 成分共同构成的宽基指数，用来代表大中盘 A 股市场。",
+    method: "本页使用指数前复权日线，在相同起止日期计算年化收益。",
+    reading: "组合收益高于基准只说明历史区间内相对更强，不证明选股能力稳定。",
+    caution: "组合行业集中时，中证 800 未必是唯一合适基准。",
+  },
+  drawdown: {
+    group: "风险指标",
+    title: "最大回撤",
+    definition: "净值从历史高点下跌到随后低点的最大幅度。",
+    method: "逐日计算净值 ÷ 此前峰值 − 1，取最负值的绝对值。",
+    reading: "它近似回答历史上最难熬的一段亏损有多深。",
+    caution: "未来回撤可能超过历史记录，且回撤未体现恢复时间。",
+  },
+  sharpe: {
+    group: "风险调整收益",
+    title: "夏普比率",
+    definition: "单位波动风险获得的超额收益。",
+    method: "（日均收益 − 日无风险收益）÷ 日收益标准差 × √252；本页假设无风险利率 2%。",
+    reading: "同口径下数值越高，历史风险收益效率越好。",
+    caution: "收益分布非正态、回测区间较短或策略有尾部风险时会失真。",
+  },
+  "real-quote": {
+    group: "数据管线",
+    title: "公开最新行情管线",
+    definition: "浏览器直接读取公开报价接口并更新股票表格。",
+    method: "约每 20 秒请求一次，失败时保留空值或显示异常状态。",
+    reading: "关注状态、标的数量和顶部行情时间。",
+    caution: "没有服务等级保证，不应用作自动交易数据源。",
+  },
+  history: {
+    group: "数据管线",
+    title: "历史价格与回测管线",
+    definition: "读取前复权日线，计算动量和等权买入持有基线。",
+    method: "对勾选股票取共同交易日并归一化，再与中证 800 比较。",
+    reading: "选择股票变化后重新计算，数据异常时不生成替代数字。",
+    caution: "当前未处理退市样本、交易费用、滑点和涨跌停。",
+  },
+  training: {
+    group: "模型治理",
+    title: "模型训练与自动换模",
+    definition: "用历史特征训练模型、验证并决定是否替换现有模型的完整流程。",
+    method: "需要后端特征库、训练任务、模型注册表、样本外验证和影子组合。",
+    reading: "当前显示“未启用”，意味着平台没有虚构训练结果或自动选股结论。",
+    caution: "即使未来启用，也必须经过人工复核，不能直接自动下单。",
+  },
+  lesson: {
+    group: "学习中心",
+    title: "研究微课",
+    definition: "把传导链、因子定义与回测误区拆成短知识卡。",
+    method: "点击不同标签切换内容，不影响行情、观察组合或回测。",
+    reading: "建议用微课中的公式和反例检查自己的研究结论。",
+    caution: "教学框架不能替代对公司公告、财报与市场数据的核验。",
+  },
+};
+
+const ExplainContext = createContext<(topic: string) => void>(() => undefined);
+
+function InfoButton({
+  topic,
+  label,
+}: {
+  topic: string;
+  label?: string;
+}) {
+  const onExplain = useContext(ExplainContext);
+  const item = EXPLANATIONS[topic];
+  if (!item) return null;
+  return (
+    <button
+      type="button"
+      className={label ? "explain-link" : "info-button"}
+      aria-label={`了解${item.title}的含义`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onExplain(topic);
+      }}
+    >
+      {label ?? "i"}
+    </button>
+  );
+}
 
 const STOCKS: Stock[] = [
   {
@@ -309,6 +580,21 @@ export default function Home() {
     "loading" | "live" | "error"
   >("loading");
   const [quoteUpdatedAt, setQuoteUpdatedAt] = useState("");
+  const [explanationKey, setExplanationKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!explanationKey) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setExplanationKey(null);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [explanationKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -471,9 +757,15 @@ export default function Home() {
     setDuration(preset.duration);
     setActivePreset(key);
     setNotice(`已载入“${preset.label}”研究假设；市场数据未被改写。`);
+    setExplanationKey("conflict");
   };
 
+  const activeExplanation = explanationKey
+    ? EXPLANATIONS[explanationKey]
+    : null;
+
   return (
+    <ExplainContext.Provider value={setExplanationKey}>
     <main className="app-shell">
       <aside className="sidebar">
         <div className="brand">
@@ -536,6 +828,7 @@ export default function Home() {
                 ? "行情接口暂不可用"
                 : "正在连接公开行情"}
             <span className="demo-pill real-pill">免费公开数据</span>
+            <InfoButton topic="public-data" />
           </div>
           <div className="top-actions">
             <label className="global-search">
@@ -566,7 +859,7 @@ export default function Home() {
                 <strong>{quoteStatus === "live" ? "已连接" : quoteStatus === "error" ? "中断" : "连接中"}</strong>
               </div>
               <div>
-                <span>观察池</span>
+                <span>观察池 <InfoButton topic="observation-pool" /></span>
                 <strong>{selected.length} 只</strong>
               </div>
               <div>
@@ -575,6 +868,19 @@ export default function Home() {
               </div>
             </div>
           </section>
+
+          <button
+            type="button"
+            className="explain-guide"
+            onClick={() => setExplanationKey("public-data")}
+          >
+            <span>i</span>
+            <div>
+              <strong>投研解释模式已开启</strong>
+              <small>页面中带有 i 的指标可以点击；会告诉你定义、计算方法、怎么看和常见误区。</small>
+            </div>
+            <b>先了解数据口径 →</b>
+          </button>
 
           {notice && (
             <button className="notice" onClick={() => setNotice("")}>
@@ -602,7 +908,10 @@ export default function Home() {
                       background: `conic-gradient(#f0643b ${riskScore * 3.6}deg, #eee9df 0deg)`,
                     }}
                   >
-                    <div><strong>{riskScore}</strong><span>假设压力</span></div>
+                    <div>
+                      <strong>{riskScore}</strong>
+                      <span>假设压力 <InfoButton topic="event-pressure" /></span>
+                    </div>
                   </div>
                   <p>当前假设：<strong>{presetLabel}</strong></p>
                 </div>
@@ -611,7 +920,7 @@ export default function Home() {
                   <div className="chain-row">
                     <div><b>海峡通航</b><span>{100 - hormuz}%</span></div>
                     <i>→</i>
-                    <div><b>油价压力</b><span>{oilPressure}/100</span></div>
+                    <div><b>油价压力 <InfoButton topic="oil-pressure" /></b><span>{oilPressure}/100</span></div>
                     <i>→</i>
                     <div><b>成本冲击</b><span>需验证</span></div>
                     <i>→</i>
@@ -626,9 +935,9 @@ export default function Home() {
               </div>
               <div className="event-footer">
                 <span>提示</span>
-                <button>这部分不是预测</button>
-                <button>不会改写真实行情</button>
-                <button>需用新闻与原油数据复核</button>
+                <button onClick={() => setExplanationKey("event-pressure")}>这部分不是预测 · i</button>
+                <button onClick={() => setExplanationKey("public-data")}>不会改写真实行情 · i</button>
+                <button onClick={() => setExplanationKey("oil-pressure")}>需用新闻与原油数据复核 · i</button>
               </div>
             </article>
 
@@ -656,7 +965,19 @@ export default function Home() {
                 ["冲击持续时间", duration, setDuration, 12, "周"],
               ].map(([label, value, setter, max, suffix]) => (
                 <label className="slider-field" key={String(label)}>
-                  <span>{label as string} <b>{value as number}{suffix as string}</b></span>
+                  <span>
+                    {label as string}
+                    <InfoButton
+                      topic={
+                        label === "冲突强度"
+                          ? "conflict"
+                          : label === "海峡受阻比例"
+                            ? "hormuz"
+                            : "duration"
+                      }
+                    />
+                    <b>{value as number}{suffix as string}</b>
+                  </span>
                   <input
                     type="range"
                     min="1"
@@ -666,18 +987,30 @@ export default function Home() {
                       (setter as (value: number) => void)(Number(event.target.value));
                       setActivePreset("");
                     }}
+                    onPointerDown={() =>
+                      setExplanationKey(
+                        label === "冲突强度"
+                          ? "conflict"
+                          : label === "海峡受阻比例"
+                            ? "hormuz"
+                            : "duration",
+                      )
+                    }
                   />
                   <i style={{ width: `${((value as number) / (max as number)) * 100}%` }} />
                 </label>
               ))}
               <div className="derived-impact">
                 <span>仅为假设输出</span>
-                <div><strong>{oilPressure}/100</strong><small>油价压力</small></div>
-                <div><strong>{riskScore}/100</strong><small>组合压力</small></div>
+                <div><strong>{oilPressure}/100</strong><small>油价压力 <InfoButton topic="oil-pressure" /></small></div>
+                <div><strong>{riskScore}/100</strong><small>组合压力 <InfoButton topic="event-pressure" /></small></div>
               </div>
               <button
                 className="primary-button"
-                onClick={() => setNotice("情景假设已更新；行情与历史回测仍使用真实市场数据。")}
+                onClick={() => {
+                  setNotice("情景假设已更新；行情与历史回测仍使用真实市场数据。");
+                  setExplanationKey("event-pressure");
+                }}
               >
                 <span>↻</span>更新情景假设
               </button>
@@ -713,14 +1046,34 @@ export default function Home() {
               </div>
               <div className="macro-factor-grid">
                 {(macro?.metrics ?? []).map((metric) => (
-                  <article className="macro-factor positive" key={metric.key}>
+                  <article
+                    className="macro-factor positive explainable-card"
+                    key={metric.key}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`了解${metric.name}的含义`}
+                    onClick={() => setExplanationKey(metric.key)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setExplanationKey(metric.key);
+                      }
+                    }}
+                  >
                     <div>
-                      <span>{metric.name}</span>
+                      <span>{metric.name} <InfoButton topic={metric.key} /></span>
                       <strong>{metric.value == null ? "--" : metric.value.toFixed(1)}{metric.unit}</strong>
                     </div>
                     <p>报告期：{metric.period}</p>
                     <small>{metric.description}</small>
-                    <a href={metric.source} target="_blank" rel="noreferrer">查看数据源 ↗</a>
+                    <a
+                      href={metric.source}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      查看数据源 ↗
+                    </a>
                   </article>
                 ))}
                 {!macro && (
@@ -762,11 +1115,16 @@ export default function Home() {
               ].map(([name, beta]) => {
                 const value = Number(beta);
                 return (
-                  <div className={`heat-cell ${value > 0.08 ? "positive" : value < -0.08 ? "negative" : "neutral"}`} key={String(name)}>
+                  <button
+                    type="button"
+                    className={`heat-cell explainable-card ${value > 0.08 ? "positive" : value < -0.08 ? "negative" : "neutral"}`}
+                    key={String(name)}
+                    onClick={() => setExplanationKey("event-beta")}
+                  >
                     <span>{name}</span>
                     <strong>{value > 0 ? "+" : ""}{value.toFixed(2)}</strong>
-                    <small>假设事件 β</small>
-                  </div>
+                    <small>假设事件 β · 点击解释</small>
+                  </button>
                 );
               })}
             </div>
@@ -795,7 +1153,10 @@ export default function Home() {
                   <button
                     key={key}
                     className={chain === key ? "active" : ""}
-                    onClick={() => setChain(key as Chain)}
+                    onClick={() => {
+                      setChain(key as Chain);
+                      setExplanationKey(key === "all" ? "public-data" : "event-beta");
+                    }}
                   >
                     {label}
                   </button>
@@ -804,9 +1165,14 @@ export default function Home() {
               </div>
               <div className="stock-table" role="table" aria-label="候选股票">
                 <div className="stock-row live-stock-row table-head" role="row">
-                  <span>加入</span><span>公司 / 行业</span><span>最新价</span>
-                  <span>涨跌幅</span><span>换手率</span><span>PE(TTM)</span>
-                  <span>PB</span><span>20日动量</span>
+                  <span><InfoButton topic="observation-pool" label="加入 i" /></span>
+                  <span>公司 / 行业</span>
+                  <span><InfoButton topic="price" label="最新价 i" /></span>
+                  <span><InfoButton topic="change" label="涨跌幅 i" /></span>
+                  <span><InfoButton topic="turnover" label="换手率 i" /></span>
+                  <span><InfoButton topic="pe" label="PE(TTM) i" /></span>
+                  <span><InfoButton topic="pb" label="PB i" /></span>
+                  <span><InfoButton topic="momentum20" label="20日动量 i" /></span>
                 </div>
                 {filteredStocks.map((stock) => {
                   const quote = quotes[stock.ticker];
@@ -823,6 +1189,7 @@ export default function Home() {
                         onClick={(event) => {
                           event.stopPropagation();
                           toggleStock(stock.ticker);
+                          setExplanationKey("observation-pool");
                         }}
                       >
                         {selected.includes(stock.ticker) ? "✓" : ""}
@@ -861,14 +1228,14 @@ export default function Home() {
                 <strong>{numberText(focusedQuote?.price)}</strong>
               </div>
               <div className="live-detail-grid">
-                <div><span>涨跌幅</span><b className={(focusedQuote?.changePct ?? 0) >= 0 ? "positive-text" : "negative-text"}>{percent(focusedQuote?.changePct)}</b></div>
-                <div><span>今开</span><b>{numberText(focusedQuote?.open)}</b></div>
-                <div><span>最高</span><b>{numberText(focusedQuote?.high)}</b></div>
-                <div><span>最低</span><b>{numberText(focusedQuote?.low)}</b></div>
-                <div><span>PE(TTM)</span><b>{numberText(focusedQuote?.pe)}</b></div>
-                <div><span>PB</span><b>{numberText(focusedQuote?.pb)}</b></div>
-                <div><span>换手率</span><b>{percent(focusedQuote?.turnover)}</b></div>
-                <div><span>20日动量</span><b>{percent(focusedMomentum)}</b></div>
+                <div><span>涨跌幅 <InfoButton topic="change" /></span><b className={(focusedQuote?.changePct ?? 0) >= 0 ? "positive-text" : "negative-text"}>{percent(focusedQuote?.changePct)}</b></div>
+                <div><span>今开 <InfoButton topic="open" /></span><b>{numberText(focusedQuote?.open)}</b></div>
+                <div><span>最高 <InfoButton topic="open" /></span><b>{numberText(focusedQuote?.high)}</b></div>
+                <div><span>最低 <InfoButton topic="open" /></span><b>{numberText(focusedQuote?.low)}</b></div>
+                <div><span>PE(TTM) <InfoButton topic="pe" /></span><b>{numberText(focusedQuote?.pe)}</b></div>
+                <div><span>PB <InfoButton topic="pb" /></span><b>{numberText(focusedQuote?.pb)}</b></div>
+                <div><span>换手率 <InfoButton topic="turnover" /></span><b>{percent(focusedQuote?.turnover)}</b></div>
+                <div><span>20日动量 <InfoButton topic="momentum20" /></span><b>{percent(focusedMomentum)}</b></div>
               </div>
               <div className="evidence-block">
                 <span className="eyebrow">研究假设</span>
@@ -877,7 +1244,13 @@ export default function Home() {
               <div className="risk-box">
                 <span>反方条件</span><p>{focusedStock.risk}</p>
               </div>
-              <button className="detail-button" onClick={() => toggleStock(focusedStock.ticker)}>
+              <button
+                className="detail-button"
+                onClick={() => {
+                  toggleStock(focusedStock.ticker);
+                  setExplanationKey("observation-pool");
+                }}
+              >
                 {selected.includes(focusedStock.ticker) ? "✓ 已加入观察组合" : "+ 加入观察组合"}
               </button>
             </aside>
@@ -898,13 +1271,13 @@ export default function Home() {
             <div className="backtest-grid">
               <article className="performance-card">
                 <div className="metric-grid">
-                  <div><span>组合年化</span><strong className={(backtest?.annualized ?? 0) >= 0 ? "positive-text" : "negative-text"}>{percent(backtest?.annualized)}</strong><small>观察池等权买入持有</small></div>
-                  <div><span>中证800年化</span><strong>{percent(backtest?.benchmarkAnnualized)}</strong><small>指数前复权日线</small></div>
-                  <div><span>最大回撤</span><strong className="negative-text">{backtest ? `-${backtest.maxDrawdown.toFixed(2)}%` : "--"}</strong><small>组合净值峰谷跌幅</small></div>
-                  <div><span>夏普比率</span><strong>{backtest ? backtest.sharpe.toFixed(2) : "--"}</strong><small>无风险利率假设 2.0%</small></div>
+                  <div className="explainable-metric" role="button" tabIndex={0} onClick={() => setExplanationKey("annualized")} onKeyDown={(event) => event.key === "Enter" && setExplanationKey("annualized")}><span>组合年化 <i>i</i></span><strong className={(backtest?.annualized ?? 0) >= 0 ? "positive-text" : "negative-text"}>{percent(backtest?.annualized)}</strong><small>观察池等权买入持有 · 点击解释</small></div>
+                  <div className="explainable-metric" role="button" tabIndex={0} onClick={() => setExplanationKey("benchmark")} onKeyDown={(event) => event.key === "Enter" && setExplanationKey("benchmark")}><span>中证800年化 <i>i</i></span><strong>{percent(backtest?.benchmarkAnnualized)}</strong><small>指数前复权日线 · 点击解释</small></div>
+                  <div className="explainable-metric" role="button" tabIndex={0} onClick={() => setExplanationKey("drawdown")} onKeyDown={(event) => event.key === "Enter" && setExplanationKey("drawdown")}><span>最大回撤 <i>i</i></span><strong className="negative-text">{backtest ? `-${backtest.maxDrawdown.toFixed(2)}%` : "--"}</strong><small>组合净值峰谷跌幅 · 点击解释</small></div>
+                  <div className="explainable-metric" role="button" tabIndex={0} onClick={() => setExplanationKey("sharpe")} onKeyDown={(event) => event.key === "Enter" && setExplanationKey("sharpe")}><span>夏普比率 <i>i</i></span><strong>{backtest ? backtest.sharpe.toFixed(2) : "--"}</strong><small>无风险利率假设 2.0% · 点击解释</small></div>
                 </div>
                 <div className="chart-header">
-                  <div><button className="active">累计净值</button></div>
+                  <div><button className="active" onClick={() => setExplanationKey("annualized")}>累计净值 · i</button></div>
                   <div className="legend">
                     <span><i className="strategy-line" />观察组合</span>
                     <span><i className="benchmark-line" />中证800</span>
@@ -935,7 +1308,7 @@ export default function Home() {
                   <div className="warn"><span>!</span><p><b>暂未计交易摩擦</b><small>未计税费、滑点与涨跌停约束</small></p></div>
                 </div>
                 <div className="cost-box">
-                  <span>数据范围</span>
+                  <span>数据范围 <InfoButton topic="observation-pool" /></span>
                   <strong>{selected.length} 只股票</strong>
                   <small>选择变化后自动重算 · 不影响真实行情</small>
                 </div>
@@ -952,21 +1325,21 @@ export default function Home() {
               <span className="pipeline-time">页面端行情每 20 秒刷新</span>
             </div>
             <div className="model-arena pipeline-arena">
-              <article>
+              <article className="explainable-card" role="button" tabIndex={0} onClick={() => setExplanationKey("real-quote")} onKeyDown={(event) => event.key === "Enter" && setExplanationKey("real-quote")}>
                 <div className="model-card-head"><span className="model-badge champion">已启用</span><small>浏览器直连</small></div>
-                <h3>公开最新行情</h3>
+                <h3>公开最新行情 <InfoButton topic="real-quote" /></h3>
                 <p>最新价、涨跌幅、换手率、PE 与 PB。接口失败时显示空值，不回退到模拟数。</p>
                 <div className="model-metrics"><div><span>状态</span><b>{quoteStatus === "live" ? "正常" : quoteStatus === "error" ? "异常" : "连接中"}</b></div><div><span>标的</span><b>{Object.keys(quotes).length}</b></div><div><span>刷新</span><b>20秒</b></div></div>
               </article>
-              <article>
+              <article className="explainable-card" role="button" tabIndex={0} onClick={() => setExplanationKey("history")} onKeyDown={(event) => event.key === "Enter" && setExplanationKey("history")}>
                 <div className="model-card-head"><span className="model-badge champion">已启用</span><small>前复权日线</small></div>
-                <h3>历史价格与回测</h3>
+                <h3>历史价格与回测 <InfoButton topic="history" /></h3>
                 <p>免费公开日线用于价格动量与等权基线回测，结果随观察池实时重算。</p>
                 <div className="model-metrics"><div><span>状态</span><b>{historyStatus === "live" ? "正常" : historyStatus === "error" ? "异常" : "加载中"}</b></div><div><span>股票</span><b>{Object.keys(histories).length}</b></div><div><span>基准</span><b>中证800</b></div></div>
               </article>
-              <article>
+              <article className="explainable-card" role="button" tabIndex={0} onClick={() => setExplanationKey("training")} onKeyDown={(event) => event.key === "Enter" && setExplanationKey("training")}>
                 <div className="model-card-head"><span className="model-badge shadow">未启用</span><small>需要后端</small></div>
-                <h3>模型训练与自动换模</h3>
+                <h3>模型训练与自动换模 <InfoButton topic="training" /></h3>
                 <p>GitHub Pages 只有前端，尚无特征库、训练任务、模型注册表或影子组合，因此不宣称自主学习。</p>
                 <div className="model-metrics"><div><span>训练</span><b>关闭</b></div><div><span>自动下单</span><b>禁止</b></div><div><span>人工复核</span><b>必需</b></div></div>
               </article>
@@ -983,7 +1356,16 @@ export default function Home() {
               <p>平台把事实、假设、回测口径与反例拆开，方便准备晨会与训练研究框架。</p>
               <div className="lesson-tabs">
                 {["传导链", "因子词典", "回测陷阱"].map((item) => (
-                  <button key={item} className={lesson === item ? "active" : ""} onClick={() => setLesson(item)}>{item}</button>
+                  <button
+                    key={item}
+                    className={lesson === item ? "active" : ""}
+                    onClick={() => {
+                      setLesson(item);
+                      setExplanationKey("lesson");
+                    }}
+                  >
+                    {item} · i
+                  </button>
                 ))}
               </div>
             </div>
@@ -996,7 +1378,7 @@ export default function Home() {
             <div className="checklist-card">
               <span className="eyebrow">提交前检查</span><h3>晨会研究清单</h3>
               {["原始事实与主观假设已分开", "记录数据来源与报告期", "至少保留一个反方情景", "回测口径可以复算", "结论注明失效条件"].map((item) => (
-                <label key={item}><input type="checkbox" /><span>{item}</span></label>
+                <label key={item} onClick={() => setExplanationKey("lesson")}><input type="checkbox" /><span>{item}</span><i>i</i></label>
               ))}
               <div><strong>0 / 5</strong><span>完成后再导出研究简报</span></div>
             </div>
@@ -1014,6 +1396,62 @@ export default function Home() {
           </footer>
         </div>
       </section>
+
+      {activeExplanation && (
+        <div
+          className="explain-overlay"
+          role="presentation"
+          onMouseDown={() => setExplanationKey(null)}
+        >
+          <aside
+            className="explain-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="explain-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="explain-head">
+              <div>
+                <span>{activeExplanation.group}</span>
+                <h2 id="explain-title">{activeExplanation.title}</h2>
+              </div>
+              <button
+                type="button"
+                className="explain-close"
+                aria-label="关闭解释"
+                onClick={() => setExplanationKey(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="explain-body">
+              <section className="definition-card">
+                <span>01 / 它是什么</span>
+                <p>{activeExplanation.definition}</p>
+              </section>
+              <section>
+                <span>02 / 怎么计算或形成</span>
+                <p>{activeExplanation.method}</p>
+              </section>
+              <section>
+                <span>03 / 投研时怎么看</span>
+                <p>{activeExplanation.reading}</p>
+              </section>
+              <section className="caution-card">
+                <span>04 / 常见误区</span>
+                <p>{activeExplanation.caution}</p>
+              </section>
+            </div>
+            <div className="explain-foot">
+              <span>按 Esc 或点击空白处关闭</span>
+              <button type="button" onClick={() => setExplanationKey(null)}>
+                我明白了
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
     </main>
+    </ExplainContext.Provider>
   );
 }
