@@ -10,6 +10,7 @@ type Stock = {
   sector: string;
   base: number;
   eventBeta: number;
+  macroBeta: number;
   quality: number;
   valuation: number;
   momentum: number;
@@ -24,6 +25,7 @@ const STOCKS: Stock[] = [
     sector: "油气开采",
     base: 72,
     eventBeta: 0.31,
+    macroBeta: -0.03,
     quality: 88,
     valuation: 72,
     momentum: 81,
@@ -36,6 +38,7 @@ const STOCKS: Stock[] = [
     sector: "油服工程",
     base: 65,
     eventBeta: 0.24,
+    macroBeta: 0.05,
     quality: 74,
     valuation: 68,
     momentum: 76,
@@ -48,6 +51,7 @@ const STOCKS: Stock[] = [
     sector: "有色金属",
     base: 69,
     eventBeta: 0.13,
+    macroBeta: 0.10,
     quality: 82,
     valuation: 63,
     momentum: 73,
@@ -60,6 +64,7 @@ const STOCKS: Stock[] = [
     sector: "炼化一体化",
     base: 66,
     eventBeta: 0.04,
+    macroBeta: 0.14,
     quality: 79,
     valuation: 78,
     momentum: 61,
@@ -72,6 +77,7 @@ const STOCKS: Stock[] = [
     sector: "基础化工",
     base: 68,
     eventBeta: -0.22,
+    macroBeta: 0.29,
     quality: 91,
     valuation: 74,
     momentum: 48,
@@ -84,6 +90,7 @@ const STOCKS: Stock[] = [
     sector: "航空机场",
     base: 61,
     eventBeta: -0.34,
+    macroBeta: 0.21,
     quality: 65,
     valuation: 57,
     momentum: 42,
@@ -98,12 +105,65 @@ const PRESETS = {
   blockade: { conflict: 88, hormuz: 82, duration: 10, label: "海峡受阻" },
 };
 
+const MACRO_PRESETS = {
+  support: {
+    label: "稳增长加码",
+    summary: "财政与流动性改善，信用向实体扩散",
+    factors: [58, 64, 72, 48, 78, 59],
+  },
+  baseline: {
+    label: "温和修复",
+    summary: "政策托底，但地产与需求修复仍不均衡",
+    factors: [51, 54, 61, 39, 67, 55],
+  },
+  pressure: {
+    label: "需求承压",
+    summary: "信用扩张放缓，风险偏好与顺周期盈利承压",
+    factors: [41, 38, 47, 30, 52, 44],
+  },
+};
+
+const MACRO_FACTORS = [
+  {
+    name: "增长动能",
+    source: "PMI · 工业增加值 · 出口",
+    direction: "盈利周期",
+  },
+  {
+    name: "信用脉冲",
+    source: "社融 · 信贷结构 · M1",
+    direction: "顺周期估值",
+  },
+  {
+    name: "流动性",
+    source: "DR007 · 公开市场操作",
+    direction: "成长股折现率",
+  },
+  {
+    name: "地产链",
+    source: "销售 · 开工 · 竣工",
+    direction: "建材与居民资产负债表",
+  },
+  {
+    name: "财政力度",
+    source: "专项债 · 政府支出",
+    direction: "基建与内需",
+  },
+  {
+    name: "人民币",
+    source: "CFETS · 中美利差",
+    direction: "外资与进口成本",
+  },
+];
+
 const NAV = [
   ["⌂", "今日总览"],
   ["◎", "事件推演"],
+  ["▦", "中国宏观"],
   ["◇", "选股工作台"],
   ["↗", "回测实验室"],
-  ["?", "学习中心"],
+  ["↻", "自主学习"],
+  ["?", "研究课堂"],
 ];
 
 const clamp = (value: number, min = 0, max = 100) =>
@@ -126,6 +186,9 @@ export default function Home() {
   const [runId, setRunId] = useState(12);
   const [notice, setNotice] = useState("");
   const [lesson, setLesson] = useState("传导链");
+  const [macroPreset, setMacroPreset] =
+    useState<keyof typeof MACRO_PRESETS>("baseline");
+  const [trainingCycle, setTrainingCycle] = useState(24);
 
   const riskScore = Math.round(
     clamp(conflict * 0.39 + hormuz * 0.46 + duration * 1.25),
@@ -136,13 +199,25 @@ export default function Home() {
   const inflationShock = (oilShock * 0.032).toFixed(1);
   const presetLabel =
     PRESETS[activePreset as keyof typeof PRESETS]?.label ?? "自定义情景";
+  const macro = MACRO_PRESETS[macroPreset];
+  const macroScore = Math.round(
+    macro.factors.reduce((sum, value) => sum + value, 0) /
+      macro.factors.length,
+  );
+  const macroImpulse = macroScore - 50;
 
   const scoredStocks = useMemo(() => {
     return STOCKS.map((stock) => ({
       ...stock,
-      score: Math.round(clamp(stock.base + stock.eventBeta * oilShock)),
+      score: Math.round(
+        clamp(
+          stock.base +
+            stock.eventBeta * oilShock +
+            stock.macroBeta * macroImpulse,
+        ),
+      ),
     })).sort((a, b) => b.score - a.score);
-  }, [oilShock]);
+  }, [oilShock, macroImpulse]);
 
   const filteredStocks = scoredStocks.filter((stock) => {
     const chainMatch =
@@ -160,10 +235,26 @@ export default function Home() {
   const focusedStock =
     scoredStocks.find((stock) => stock.ticker === focused) ?? scoredStocks[0];
 
-  const annualReturn = (10.8 + oilShock * 0.16).toFixed(1);
-  const benchmarkReturn = (7.1 - oilShock * 0.035).toFixed(1);
-  const drawdown = (6.4 + riskScore * 0.045).toFixed(1);
-  const sharpe = (1.12 + oilShock * 0.009).toFixed(2);
+  const annualReturn = (
+    10.8 +
+    oilShock * 0.16 +
+    macroImpulse * 0.08
+  ).toFixed(1);
+  const benchmarkReturn = (
+    7.1 -
+    oilShock * 0.035 +
+    macroImpulse * 0.04
+  ).toFixed(1);
+  const drawdown = (
+    6.4 +
+    riskScore * 0.045 -
+    macroImpulse * 0.025
+  ).toFixed(1);
+  const sharpe = (
+    1.12 +
+    oilShock * 0.009 +
+    macroImpulse * 0.004
+  ).toFixed(2);
 
   const applyPreset = (key: keyof typeof PRESETS) => {
     const preset = PRESETS[key];
@@ -176,7 +267,12 @@ export default function Home() {
 
   const updateScenario = () => {
     setRunId((id) => id + 1);
-    setNotice("情景、个股评分与净值回测已重新计算");
+    setNotice("黑天鹅、中国宏观、个股评分与净值回测已重新计算");
+  };
+
+  const runTraining = () => {
+    setTrainingCycle((cycle) => cycle + 1);
+    setNotice("挑战者模型已完成新一轮滚动样本外训练，等待人工复核");
   };
 
   const toggleStock = (ticker: string) => {
@@ -211,8 +307,10 @@ export default function Home() {
             const ids = [
               "overview",
               "scenario",
+              "macro",
               "stocks",
               "backtest",
+              "autonomy",
               "learn",
             ];
             return (
@@ -495,6 +593,84 @@ export default function Home() {
             </aside>
           </section>
 
+          <section className="macro-section" id="macro">
+            <div className="section-title macro-title">
+              <div>
+                <span className="eyebrow">03 / 中国宏观雷达</span>
+                <h2>把政策、信用与需求，变成可回测的行业信号。</h2>
+              </div>
+              <span>模拟信号 · 正式接数后保留首次发布日期与修订值</span>
+            </div>
+
+            <div className="macro-shell">
+              <div className="macro-summary">
+                <div>
+                  <span className="eyebrow">当前宏观状态</span>
+                  <strong>{macro.label}</strong>
+                  <p>{macro.summary}</p>
+                </div>
+                <div
+                  className="macro-gauge"
+                  style={{
+                    background: `conic-gradient(#a9d67a ${macroScore * 3.6}deg, rgba(255,255,255,.12) 0deg)`,
+                  }}
+                >
+                  <div>
+                    <b>{macroScore}</b>
+                    <span>综合脉冲</span>
+                  </div>
+                </div>
+                <div className="macro-presets" aria-label="宏观情景选择">
+                  {Object.entries(MACRO_PRESETS).map(([key, value]) => (
+                    <button
+                      key={key}
+                      className={macroPreset === key ? "active" : ""}
+                      onClick={() => {
+                        setMacroPreset(key as keyof typeof MACRO_PRESETS);
+                        setNotice(`已切换中国宏观情景：“${value.label}”`);
+                      }}
+                    >
+                      <b>{value.label}</b>
+                      <span>{value.summary}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="macro-factor-grid">
+                {MACRO_FACTORS.map((factor, index) => {
+                  const value = macro.factors[index];
+                  const tone =
+                    value >= 60 ? "positive" : value < 45 ? "negative" : "";
+                  return (
+                    <article className={`macro-factor ${tone}`} key={factor.name}>
+                      <div>
+                        <span>{factor.name}</span>
+                        <strong>{value}</strong>
+                      </div>
+                      <p>{factor.source}</p>
+                      <small>主要传导：{factor.direction}</small>
+                      <i>
+                        <em style={{ width: `${value}%` }} />
+                      </i>
+                    </article>
+                  );
+                })}
+              </div>
+
+              <div className="macro-transmission">
+                <span>进入模型</span>
+                <div><b>宏观状态</b><small>{macro.label}</small></div>
+                <i>→</i>
+                <div><b>行业敏感度</b><small>地产 / 消费 / 科技 / 周期</small></div>
+                <i>→</i>
+                <div><b>个股盈利暴露</b><small>收入、成本与估值三层校验</small></div>
+                <i>→</i>
+                <div><b>组合约束</b><small>仓位、集中度与回撤门禁</small></div>
+              </div>
+            </div>
+          </section>
+
           <section className="impact-section">
             <div className="section-title">
               <div>
@@ -534,7 +710,7 @@ export default function Home() {
             <div className="stock-table-card">
               <div className="section-title table-title">
                 <div>
-                  <span className="eyebrow">03 / 选股工作台</span>
+                  <span className="eyebrow">04 / 选股工作台</span>
                   <h2>候选股评分与证据</h2>
                 </div>
                 <div className="table-actions">
@@ -564,7 +740,7 @@ export default function Home() {
                     {label}
                   </button>
                 ))}
-                <span>模型综合：基本面 35% · 估值 20% · 动量 20% · 事件 25%</span>
+                <span>模型综合：基本面 30% · 估值 15% · 动量 15% · 事件 20% · 中国宏观 20%</span>
               </div>
 
               <div className="stock-table" role="table" aria-label="候选股票">
@@ -822,9 +998,90 @@ export default function Home() {
             </div>
           </section>
 
+          <section className="autonomy-section" id="autonomy">
+            <div className="section-title">
+              <div>
+                <span className="eyebrow">06 / 自主学习中心</span>
+                <h2>模型可以自己竞争，但不能绕过风险门禁。</h2>
+              </div>
+              <button className="training-button" onClick={runTraining}>
+                ↻ 运行第 {trainingCycle + 1} 轮训练
+              </button>
+            </div>
+
+            <div className="model-arena">
+              <article className="champion-card">
+                <div className="model-card-head">
+                  <span className="model-badge champion">正式冠军</span>
+                  <small>已上线 · 仅模拟组合</small>
+                </div>
+                <h3>多因子稳健模型 <span>v3.2</span></h3>
+                <p>质量、估值、动量与行业中性约束，作为当前基准策略。</p>
+                <div className="model-metrics">
+                  <div><span>样本外夏普</span><b>1.36</b></div>
+                  <div><span>最大回撤</span><b>-9.4%</b></div>
+                  <div><span>月均换手</span><b>18%</b></div>
+                </div>
+              </article>
+
+              <article className="challenger-card">
+                <div className="model-card-head">
+                  <span className="model-badge challenger">挑战者</span>
+                  <small>训练轮次 #{trainingCycle}</small>
+                </div>
+                <h3>宏观 × 事件融合模型 <span>v1.7</span></h3>
+                <p>新增中国宏观六维信号，并与黑天鹅事件、行业敏感度联合学习。</p>
+                <div className="model-metrics">
+                  <div><span>样本外夏普</span><b>1.44</b></div>
+                  <div><span>最大回撤</span><b>-10.1%</b></div>
+                  <div><span>稳定窗口</span><b>7 / 9</b></div>
+                </div>
+              </article>
+
+              <article className="shadow-card">
+                <div className="model-card-head">
+                  <span className="model-badge shadow">影子观察</span>
+                  <small>不产生真实指令</small>
+                </div>
+                <h3>事件文本模型 <span>v0.9</span></h3>
+                <p>只负责把政策、财报与突发新闻转成结构化特征，不单独决定买卖。</p>
+                <div className="model-metrics">
+                  <div><span>事件召回率</span><b>86%</b></div>
+                  <div><span>方向准确率</span><b>62%</b></div>
+                  <div><span>待观察</span><b>18日</b></div>
+                </div>
+              </article>
+            </div>
+
+            <div className="promotion-gate">
+              <div>
+                <span className="eyebrow">冠军晋级门槛</span>
+                <strong>挑战者尚未晋级</strong>
+                <p>收益质量有所改善，但最大回撤仍高于正式模型。</p>
+              </div>
+              {[
+                ["滚动样本外验证", "通过", "pass"],
+                ["交易成本与涨跌停", "通过", "pass"],
+                ["多市场状态稳定性", "观察", "watch"],
+                ["20日影子组合", "未完成", "pending"],
+                ["基金经理人工批准", "必需", "locked"],
+              ].map(([name, status, tone]) => (
+                <div className={`gate-item ${tone}`} key={name}>
+                  <i>{tone === "pass" ? "✓" : tone === "locked" ? "⌁" : "·"}</i>
+                  <span>{name}</span>
+                  <b>{status}</b>
+                </div>
+              ))}
+            </div>
+
+            <p className="autonomy-note">
+              数据按首次可得时间入库；任何修订值都保留版本。模型不会自动下单，也不能自行修改仓位、回撤和流动性上限。
+            </p>
+          </section>
+
           <section className="learning-section" id="learn">
             <div className="learning-copy">
-              <span className="eyebrow">05 / 投研学习中心</span>
+              <span className="eyebrow">07 / 投研学习中心</span>
               <h2>每一个结论，都要能讲清楚“为什么”。</h2>
               <p>
                 平台把本次推演拆成概念、公式、证据与反例。你可以用它准备晨会，也可以用它训练自己的研究框架。
