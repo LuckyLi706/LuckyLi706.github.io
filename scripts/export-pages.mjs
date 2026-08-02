@@ -5,11 +5,13 @@ import path from "node:path";
 const root = process.cwd();
 const output = path.join(root, "pages-dist");
 const client = path.join(root, "dist", "client");
+const publicDirectory = path.join(root, "public");
 const workerEntry = path.join(root, "dist", "server", "index.js");
 
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 await cp(client, output, { recursive: true });
+await cp(publicDirectory, output, { recursive: true, force: true });
 
 const workerUrl = pathToFileURL(workerEntry);
 workerUrl.searchParams.set("static-export", Date.now().toString());

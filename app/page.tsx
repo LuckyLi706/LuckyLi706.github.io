@@ -1,100 +1,121 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Chain = "all" | "benefit" | "stress";
 
 type Stock = {
   ticker: string;
+  secid: string;
   name: string;
   sector: string;
-  base: number;
   eventBeta: number;
-  macroBeta: number;
-  quality: number;
-  valuation: number;
-  momentum: number;
   thesis: string;
   risk: string;
+};
+
+type Quote = {
+  ticker: string;
+  name: string;
+  price: number | null;
+  changePct: number | null;
+  change: number | null;
+  turnover: number | null;
+  pe: number | null;
+  pb: number | null;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  previousClose: number | null;
+  updatedAt: string;
+};
+
+type PricePoint = {
+  date: string;
+  close: number;
+};
+
+type MacroMetric = {
+  key: string;
+  name: string;
+  value: number | null;
+  unit: string;
+  period: string;
+  description: string;
+  source: string;
+};
+
+type MacroSnapshot = {
+  generatedAt: string;
+  provider: string;
+  metrics: MacroMetric[];
+};
+
+type BacktestResult = {
+  annualized: number;
+  benchmarkAnnualized: number;
+  maxDrawdown: number;
+  sharpe: number;
+  start: string;
+  end: string;
+  observations: number;
+  strategyPolygon: string;
+  benchmarkPolygon: string;
 };
 
 const STOCKS: Stock[] = [
   {
     ticker: "600938",
+    secid: "1.600938",
     name: "中国海油",
     sector: "油气开采",
-    base: 72,
     eventBeta: 0.31,
-    macroBeta: -0.03,
-    quality: 88,
-    valuation: 72,
-    momentum: 81,
-    thesis: "高油价直接增厚上游盈利，自由现金流与股东回报形成缓冲。",
+    thesis: "高油价可能增厚上游盈利，自由现金流与股东回报形成缓冲。",
     risk: "停火快于预期、油价风险溢价快速回吐。",
   },
   {
     ticker: "601808",
+    secid: "1.601808",
     name: "中海油服",
     sector: "油服工程",
-    base: 65,
     eventBeta: 0.24,
-    macroBeta: 0.05,
-    quality: 74,
-    valuation: 68,
-    momentum: 76,
-    thesis: "资本开支预期抬升，钻井平台利用率和日费率存在改善空间。",
+    thesis: "油企资本开支若抬升，钻井平台利用率和日费率存在改善空间。",
     risk: "油价冲击短暂，油企资本开支未跟随上行。",
   },
   {
     ticker: "601899",
+    secid: "1.601899",
     name: "紫金矿业",
     sector: "有色金属",
-    base: 69,
     eventBeta: 0.13,
-    macroBeta: 0.10,
-    quality: 82,
-    valuation: 63,
-    momentum: 73,
-    thesis: "黄金与铜的组合暴露提供避险和供给扰动的双重弹性。",
-    risk: "美元与实际利率同步走高，压制贵金属估值。",
+    thesis: "黄金与铜的组合暴露可能提供避险和供给扰动的双重弹性。",
+    risk: "美元与实际利率同步走高，可能压制贵金属估值。",
   },
   {
     ticker: "600028",
+    secid: "1.600028",
     name: "中国石化",
     sector: "炼化一体化",
-    base: 66,
     eventBeta: 0.04,
-    macroBeta: 0.14,
-    quality: 79,
-    valuation: 78,
-    momentum: 61,
-    thesis: "库存收益提供阶段性支撑，但炼化价差决定最终盈利弹性。",
+    thesis: "库存收益可能提供阶段性支撑，但炼化价差决定最终盈利弹性。",
     risk: "原料上涨快于成品油调价，炼化毛利受到挤压。",
   },
   {
     ticker: "600309",
+    secid: "1.600309",
     name: "万华化学",
     sector: "基础化工",
-    base: 68,
     eventBeta: -0.22,
-    macroBeta: 0.29,
-    quality: 91,
-    valuation: 74,
-    momentum: 48,
-    thesis: "优质龙头具备成本转嫁能力，但短期受能源与原料价格压制。",
-    risk: "油价持续高位且终端需求偏弱，价差收缩。",
+    thesis: "龙头具备一定成本转嫁能力，但短期可能受能源与原料价格压制。",
+    risk: "油价持续高位且终端需求偏弱，产品价差收缩。",
   },
   {
     ticker: "600029",
+    secid: "1.600029",
     name: "南方航空",
     sector: "航空机场",
-    base: 61,
     eventBeta: -0.34,
-    macroBeta: 0.21,
-    quality: 65,
-    valuation: 57,
-    momentum: 42,
-    thesis: "油价与绕航成本上升压制利润，票价传导存在时滞。",
+    thesis: "油价与绕航成本上升可能压制利润，票价传导存在时滞。",
     risk: "航油成本超预期上升、国际航线恢复受阻。",
   },
 ];
@@ -105,69 +126,165 @@ const PRESETS = {
   blockade: { conflict: 88, hormuz: 82, duration: 10, label: "海峡受阻" },
 };
 
-const MACRO_PRESETS = {
-  support: {
-    label: "稳增长加码",
-    summary: "财政与流动性改善，信用向实体扩散",
-    factors: [58, 64, 72, 48, 78, 59],
-  },
-  baseline: {
-    label: "温和修复",
-    summary: "政策托底，但地产与需求修复仍不均衡",
-    factors: [51, 54, 61, 39, 67, 55],
-  },
-  pressure: {
-    label: "需求承压",
-    summary: "信用扩张放缓，风险偏好与顺周期盈利承压",
-    factors: [41, 38, 47, 30, 52, 44],
-  },
-};
-
-const MACRO_FACTORS = [
-  {
-    name: "增长动能",
-    source: "PMI · 工业增加值 · 出口",
-    direction: "盈利周期",
-  },
-  {
-    name: "信用脉冲",
-    source: "社融 · 信贷结构 · M1",
-    direction: "顺周期估值",
-  },
-  {
-    name: "流动性",
-    source: "DR007 · 公开市场操作",
-    direction: "成长股折现率",
-  },
-  {
-    name: "地产链",
-    source: "销售 · 开工 · 竣工",
-    direction: "建材与居民资产负债表",
-  },
-  {
-    name: "财政力度",
-    source: "专项债 · 政府支出",
-    direction: "基建与内需",
-  },
-  {
-    name: "人民币",
-    source: "CFETS · 中美利差",
-    direction: "外资与进口成本",
-  },
-];
-
 const NAV = [
   ["⌂", "今日总览"],
   ["◎", "事件推演"],
   ["▦", "中国宏观"],
   ["◇", "选股工作台"],
-  ["↗", "回测实验室"],
-  ["↻", "自主学习"],
+  ["↗", "真实回测"],
+  ["↻", "数据管线"],
   ["?", "研究课堂"],
 ];
 
-const clamp = (value: number, min = 0, max = 100) =>
-  Math.max(min, Math.min(max, value));
+const QUOTE_URL =
+  "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&invt=2&fields=f2,f3,f4,f8,f9,f12,f14,f15,f16,f17,f18,f20,f23,f124&secids=" +
+  STOCKS.map((stock) => stock.secid).join(",");
+
+const HISTORY_URL = (secid: string, limit = 760) =>
+  `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&klt=101&fqt=1&lmt=${limit}&end=20500101&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61`;
+
+const toNumber = (value: unknown) => {
+  const number = Number(value);
+  return Number.isFinite(number) && value !== "-" ? number : null;
+};
+
+const percent = (value: number | null | undefined, digits = 2) =>
+  value == null ? "--" : `${value > 0 ? "+" : ""}${value.toFixed(digits)}%`;
+
+const numberText = (value: number | null | undefined, digits = 2) =>
+  value == null ? "--" : value.toFixed(digits);
+
+const formatDateTime = (value: string | number | null | undefined) => {
+  if (!value) return "--";
+  const date =
+    typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Shanghai",
+  }).format(date);
+};
+
+const momentum20 = (points: PricePoint[] | undefined) => {
+  if (!points || points.length < 21) return null;
+  const latest = points.at(-1)?.close;
+  const start = points.at(-21)?.close;
+  if (!latest || !start) return null;
+  return (latest / start - 1) * 100;
+};
+
+const polygonPair = (
+  strategy: number[],
+  benchmark: number[],
+): [string, string] => {
+  if (strategy.length < 2 || benchmark.length < 2) {
+    return ["polygon(0 100%,100% 100%)", "polygon(0 100%,100% 100%)"];
+  }
+  const step = Math.max(1, Math.floor(strategy.length / 90));
+  const indexes = Array.from(
+    { length: Math.ceil(strategy.length / step) },
+    (_, index) => Math.min(index * step, strategy.length - 1),
+  );
+  if (indexes.at(-1) !== strategy.length - 1) indexes.push(strategy.length - 1);
+  const all = [...strategy, ...benchmark];
+  const min = Math.min(...all);
+  const max = Math.max(...all);
+  const range = Math.max(max - min, 0.01);
+  const make = (values: number[]) => {
+    const line = indexes
+      .map((index, pointIndex) => {
+        const x = (pointIndex / (indexes.length - 1)) * 100;
+        const y = 90 - ((values[index] - min) / range) * 78;
+        return `${x.toFixed(1)}% ${y.toFixed(1)}%`;
+      })
+      .join(",");
+    return `polygon(${line},100% 100%,0 100%)`;
+  };
+  return [make(strategy), make(benchmark)];
+};
+
+const calculateBacktest = (
+  histories: Record<string, PricePoint[]>,
+  benchmark: PricePoint[],
+  tickers: string[],
+): BacktestResult | null => {
+  if (!tickers.length || !benchmark.length) return null;
+  const series = tickers.map((ticker) => histories[ticker] ?? []);
+  if (series.some((points) => points.length < 30)) return null;
+
+  const dateSets = series.slice(1).map(
+    (points) => new Set(points.map((point) => point.date)),
+  );
+  const benchmarkMap = new Map(benchmark.map((point) => [point.date, point.close]));
+  const dates = series[0]
+    .map((point) => point.date)
+    .filter(
+      (date) =>
+        dateSets.every((set) => set.has(date)) && benchmarkMap.has(date),
+    )
+    .slice(-750);
+  if (dates.length < 30) return null;
+
+  const maps = series.map(
+    (points) => new Map(points.map((point) => [point.date, point.close])),
+  );
+  const firstPrices = maps.map((map) => map.get(dates[0]) ?? 0);
+  const firstBenchmark = benchmarkMap.get(dates[0]) ?? 0;
+  if (firstPrices.some((price) => !price) || !firstBenchmark) return null;
+
+  const strategy = dates.map(
+    (date) =>
+      maps.reduce(
+        (sum, map, index) =>
+          sum + (map.get(date) ?? firstPrices[index]) / firstPrices[index],
+        0,
+      ) / maps.length,
+  );
+  const benchmarkCurve = dates.map(
+    (date) => (benchmarkMap.get(date) ?? firstBenchmark) / firstBenchmark,
+  );
+  const dailyReturns = strategy
+    .slice(1)
+    .map((value, index) => value / strategy[index] - 1);
+  const years = (dates.length - 1) / 252;
+  const annualized = (strategy.at(-1)! ** (1 / years) - 1) * 100;
+  const benchmarkAnnualized =
+    (benchmarkCurve.at(-1)! ** (1 / years) - 1) * 100;
+  let peak = strategy[0];
+  let maxDrawdown = 0;
+  for (const value of strategy) {
+    peak = Math.max(peak, value);
+    maxDrawdown = Math.min(maxDrawdown, value / peak - 1);
+  }
+  const mean =
+    dailyReturns.reduce((sum, value) => sum + value, 0) / dailyReturns.length;
+  const variance =
+    dailyReturns.reduce((sum, value) => sum + (value - mean) ** 2, 0) /
+    Math.max(dailyReturns.length - 1, 1);
+  const standardDeviation = Math.sqrt(variance);
+  const sharpe = standardDeviation
+    ? ((mean - 0.02 / 252) / standardDeviation) * Math.sqrt(252)
+    : 0;
+  const [strategyPolygon, benchmarkPolygon] = polygonPair(
+    strategy,
+    benchmarkCurve,
+  );
+  return {
+    annualized,
+    benchmarkAnnualized,
+    maxDrawdown: Math.abs(maxDrawdown) * 100,
+    sharpe,
+    start: dates[0],
+    end: dates.at(-1)!,
+    observations: dates.length,
+    strategyPolygon,
+    benchmarkPolygon,
+  };
+};
 
 export default function Home() {
   const [activeNav, setActiveNav] = useState("今日总览");
@@ -177,103 +294,159 @@ export default function Home() {
   const [activePreset, setActivePreset] = useState("contained");
   const [chain, setChain] = useState<Chain>("all");
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<string[]>([
-    "600938",
-    "601808",
-    "601899",
-  ]);
+  const [selected, setSelected] = useState(["600938", "601808", "601899"]);
   const [focused, setFocused] = useState("600938");
-  const [runId, setRunId] = useState(12);
   const [notice, setNotice] = useState("");
   const [lesson, setLesson] = useState("传导链");
-  const [macroPreset, setMacroPreset] =
-    useState<keyof typeof MACRO_PRESETS>("baseline");
-  const [trainingCycle, setTrainingCycle] = useState(24);
+  const [quotes, setQuotes] = useState<Record<string, Quote>>({});
+  const [histories, setHistories] = useState<Record<string, PricePoint[]>>({});
+  const [benchmark, setBenchmark] = useState<PricePoint[]>([]);
+  const [macro, setMacro] = useState<MacroSnapshot | null>(null);
+  const [quoteStatus, setQuoteStatus] = useState<"loading" | "live" | "error">(
+    "loading",
+  );
+  const [historyStatus, setHistoryStatus] = useState<
+    "loading" | "live" | "error"
+  >("loading");
+  const [quoteUpdatedAt, setQuoteUpdatedAt] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadQuotes = async () => {
+      try {
+        const response = await fetch(QUOTE_URL, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        const next: Record<string, Quote> = {};
+        for (const item of payload?.data?.diff ?? []) {
+          const ticker = String(item.f12);
+          next[ticker] = {
+            ticker,
+            name: String(item.f14 ?? ""),
+            price: toNumber(item.f2),
+            changePct: toNumber(item.f3),
+            change: toNumber(item.f4),
+            turnover: toNumber(item.f8),
+            pe: toNumber(item.f9),
+            pb: toNumber(item.f23),
+            open: toNumber(item.f17),
+            high: toNumber(item.f15),
+            low: toNumber(item.f16),
+            previousClose: toNumber(item.f18),
+            updatedAt: item.f124 ? new Date(Number(item.f124) * 1000).toISOString() : "",
+          };
+        }
+        if (!cancelled && Object.keys(next).length) {
+          setQuotes(next);
+          setQuoteStatus("live");
+          setQuoteUpdatedAt(
+            Object.values(next).find((quote) => quote.updatedAt)?.updatedAt ??
+              new Date().toISOString(),
+          );
+        }
+      } catch {
+        if (!cancelled) setQuoteStatus("error");
+      }
+    };
+
+    const loadHistory = async () => {
+      try {
+        const targets = [
+          ...STOCKS.map((stock) => [stock.ticker, stock.secid] as const),
+          ["benchmark", "1.000906"] as const,
+        ];
+        const results = await Promise.all(
+          targets.map(async ([ticker, secid]) => {
+            const response = await fetch(HISTORY_URL(secid), {
+              cache: "force-cache",
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const payload = await response.json();
+            const points: PricePoint[] = (payload?.data?.klines ?? [])
+              .map((row: string) => {
+                const fields = row.split(",");
+                return { date: fields[0], close: Number(fields[2]) };
+              })
+              .filter(
+                (point: PricePoint) =>
+                  point.date && Number.isFinite(point.close) && point.close > 0,
+              );
+            return [ticker, points] as const;
+          }),
+        );
+        if (!cancelled) {
+          const next: Record<string, PricePoint[]> = {};
+          for (const [ticker, points] of results) {
+            if (ticker === "benchmark") setBenchmark(points);
+            else next[ticker] = points;
+          }
+          setHistories(next);
+          setHistoryStatus("live");
+        }
+      } catch {
+        if (!cancelled) setHistoryStatus("error");
+      }
+    };
+
+    const loadMacro = async () => {
+      try {
+        const response = await fetch("./data/macro.json", {
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = (await response.json()) as MacroSnapshot;
+        if (!cancelled) setMacro(payload);
+      } catch {
+        if (!cancelled) setMacro(null);
+      }
+    };
+
+    void loadQuotes();
+    void loadHistory();
+    void loadMacro();
+    const interval = window.setInterval(loadQuotes, 20_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
 
   const riskScore = Math.round(
-    clamp(conflict * 0.39 + hormuz * 0.46 + duration * 1.25),
+    Math.min(100, conflict * 0.39 + hormuz * 0.46 + duration * 1.25),
   );
-  const oilShock = Math.round(
-    clamp(conflict * 0.2 + hormuz * 0.42 + duration * 1.6 - 9, 2, 68),
+  const oilPressure = Math.round(
+    Math.min(100, conflict * 0.25 + hormuz * 0.55 + duration * 1.4),
   );
-  const inflationShock = (oilShock * 0.032).toFixed(1);
   const presetLabel =
     PRESETS[activePreset as keyof typeof PRESETS]?.label ?? "自定义情景";
-  const macro = MACRO_PRESETS[macroPreset];
-  const macroScore = Math.round(
-    macro.factors.reduce((sum, value) => sum + value, 0) /
-      macro.factors.length,
-  );
-  const macroImpulse = macroScore - 50;
 
-  const scoredStocks = useMemo(() => {
-    return STOCKS.map((stock) => ({
-      ...stock,
-      score: Math.round(
-        clamp(
-          stock.base +
-            stock.eventBeta * oilShock +
-            stock.macroBeta * macroImpulse,
-        ),
-      ),
-    })).sort((a, b) => b.score - a.score);
-  }, [oilShock, macroImpulse]);
-
-  const filteredStocks = scoredStocks.filter((stock) => {
-    const chainMatch =
-      chain === "all" ||
-      (chain === "benefit" && stock.eventBeta > 0.08) ||
-      (chain === "stress" && stock.eventBeta < 0);
-    const queryMatch =
-      !query ||
-      `${stock.ticker}${stock.name}${stock.sector}`
-        .toLowerCase()
-        .includes(query.toLowerCase());
-    return chainMatch && queryMatch;
-  });
+  const filteredStocks = useMemo(() => {
+    return STOCKS.filter((stock) => {
+      const chainMatch =
+        chain === "all" ||
+        (chain === "benefit" && stock.eventBeta > 0.08) ||
+        (chain === "stress" && stock.eventBeta < 0);
+      const queryMatch =
+        !query ||
+        `${stock.ticker}${stock.name}${stock.sector}`
+          .toLowerCase()
+          .includes(query.toLowerCase());
+      return chainMatch && queryMatch;
+    }).sort((a, b) => {
+      const aChange = quotes[a.ticker]?.changePct ?? -Infinity;
+      const bChange = quotes[b.ticker]?.changePct ?? -Infinity;
+      return bChange - aChange;
+    });
+  }, [chain, query, quotes]);
 
   const focusedStock =
-    scoredStocks.find((stock) => stock.ticker === focused) ?? scoredStocks[0];
-
-  const annualReturn = (
-    10.8 +
-    oilShock * 0.16 +
-    macroImpulse * 0.08
-  ).toFixed(1);
-  const benchmarkReturn = (
-    7.1 -
-    oilShock * 0.035 +
-    macroImpulse * 0.04
-  ).toFixed(1);
-  const drawdown = (
-    6.4 +
-    riskScore * 0.045 -
-    macroImpulse * 0.025
-  ).toFixed(1);
-  const sharpe = (
-    1.12 +
-    oilShock * 0.009 +
-    macroImpulse * 0.004
-  ).toFixed(2);
-
-  const applyPreset = (key: keyof typeof PRESETS) => {
-    const preset = PRESETS[key];
-    setConflict(preset.conflict);
-    setHormuz(preset.hormuz);
-    setDuration(preset.duration);
-    setActivePreset(key);
-    setNotice(`已载入“${preset.label}”情景`);
-  };
-
-  const updateScenario = () => {
-    setRunId((id) => id + 1);
-    setNotice("黑天鹅、中国宏观、个股评分与净值回测已重新计算");
-  };
-
-  const runTraining = () => {
-    setTrainingCycle((cycle) => cycle + 1);
-    setNotice("挑战者模型已完成新一轮滚动样本外训练，等待人工复核");
-  };
+    STOCKS.find((stock) => stock.ticker === focused) ?? STOCKS[0];
+  const focusedQuote = quotes[focusedStock.ticker];
+  const focusedMomentum = momentum20(histories[focusedStock.ticker]);
+  const backtest = useMemo(
+    () => calculateBacktest(histories, benchmark, selected),
+    [histories, benchmark, selected],
+  );
 
   const toggleStock = (ticker: string) => {
     setSelected((current) =>
@@ -291,6 +464,15 @@ export default function Home() {
     });
   };
 
+  const applyPreset = (key: keyof typeof PRESETS) => {
+    const preset = PRESETS[key];
+    setConflict(preset.conflict);
+    setHormuz(preset.hormuz);
+    setDuration(preset.duration);
+    setActivePreset(key);
+    setNotice(`已载入“${preset.label}”研究假设；市场数据未被改写。`);
+  };
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -301,7 +483,6 @@ export default function Home() {
             <span>SCENARIO LAB</span>
           </div>
         </div>
-
         <nav aria-label="主导航">
           {NAV.map(([icon, label], index) => {
             const ids = [
@@ -325,22 +506,19 @@ export default function Home() {
             );
           })}
         </nav>
-
         <div className="sidebar-note">
           <span className="pulse-dot" />
           <div>
-            <strong>研究沙盒</strong>
-            <p>当前为模拟数据，不连接实盘交易。</p>
+            <strong>公开数据模式</strong>
+            <p>最新价可能延迟，不连接券商交易。</p>
           </div>
         </div>
-
         <div className="analyst">
           <span className="avatar">实</span>
           <div>
             <strong>研究实习生</strong>
-            <span>模拟组合 · 观察员</span>
+            <span>观察组合 · 只读研究</span>
           </div>
-          <button aria-label="更多">···</button>
         </div>
       </aside>
 
@@ -351,63 +529,56 @@ export default function Home() {
             <strong>砺石研究</strong>
           </div>
           <div className="market-status">
-            <span className="live-dot" />
-            情景快照 · 2026.03.02 10:30
-            <span className="demo-pill">模拟数据</span>
+            <span className={quoteStatus === "live" ? "live-dot" : "live-dot offline"} />
+            {quoteStatus === "live"
+              ? `公开最新价 · ${formatDateTime(quoteUpdatedAt)}`
+              : quoteStatus === "error"
+                ? "行情接口暂不可用"
+                : "正在连接公开行情"}
+            <span className="demo-pill real-pill">免费公开数据</span>
           </div>
           <div className="top-actions">
             <label className="global-search">
               <span>⌕</span>
-              <input
-                aria-label="全局搜索"
-                placeholder="搜索公司 / 事件 / 因子"
-              />
-              <kbd>⌘ K</kbd>
+              <input aria-label="全局搜索" placeholder="搜索公司 / 代码" />
             </label>
-            <button className="icon-button" aria-label="通知">
-              ◌
-              <i />
+            <button
+              className="export-button"
+              onClick={() => window.print()}
+            >
+              导出研究简报
             </button>
-            <button className="export-button">导出研究简报</button>
           </div>
         </header>
 
         <div className="content">
           <section className="page-intro" id="overview">
             <div>
-              <span className="eyebrow">今日研究任务 / DAILY BRIEF</span>
-              <h1>把黑天鹅，拆成可验证的投资假设。</h1>
+              <span className="eyebrow">公开数据投研台 / PUBLIC DATA</span>
+              <h1>真实行情做底座，情景假设单独推演。</h1>
               <p>
-                从地缘事件识别、跨资产传导到A股个股暴露，建立可解释、可回测、可复盘的研究闭环。
+                最新价、估值、历史回测来自免费公开数据；中国宏观指标按统计发布频率更新。所有主观情景均明确标注，不伪装成市场事实。
               </p>
             </div>
             <div className="brief-stats">
               <div>
-                <span>风险状态</span>
-                <strong className={riskScore > 70 ? "risk-high" : ""}>
-                  {riskScore > 70 ? "高警戒" : riskScore > 45 ? "警戒" : "平稳"}
-                </strong>
+                <span>行情状态</span>
+                <strong>{quoteStatus === "live" ? "已连接" : quoteStatus === "error" ? "中断" : "连接中"}</strong>
               </div>
               <div>
                 <span>观察池</span>
                 <strong>{selected.length} 只</strong>
               </div>
               <div>
-                <span>最新回测</span>
-                <strong>#{runId}</strong>
+                <span>历史日线</span>
+                <strong>{historyStatus === "live" ? "已加载" : historyStatus === "error" ? "失败" : "加载中"}</strong>
               </div>
             </div>
           </section>
 
           {notice && (
-            <button
-              className="notice"
-              onClick={() => setNotice("")}
-              aria-label="关闭提示"
-            >
-              <span>✓</span>
-              {notice}
-              <b>×</b>
+            <button className="notice" onClick={() => setNotice("")}>
+              <span>✓</span>{notice}<b>×</b>
             </button>
           )}
 
@@ -417,16 +588,12 @@ export default function Home() {
                 <div>
                   <span className="section-index">01</span>
                   <div>
-                    <span className="eyebrow">外生事件监测</span>
+                    <span className="eyebrow">研究假设 · 非实时事件判断</span>
                     <h2>美伊冲突 · 霍尔木兹传导</h2>
                   </div>
                 </div>
-                <span className="severity">
-                  <i />
-                  重大事件
-                </span>
+                <span className="severity hypothesis-pill">情景推演</span>
               </div>
-
               <div className="event-body">
                 <div className="event-score">
                   <div
@@ -435,62 +602,33 @@ export default function Home() {
                       background: `conic-gradient(#f0643b ${riskScore * 3.6}deg, #eee9df 0deg)`,
                     }}
                   >
-                    <div>
-                      <strong>{riskScore}</strong>
-                      <span>冲击分</span>
-                    </div>
+                    <div><strong>{riskScore}</strong><span>假设压力</span></div>
                   </div>
-                  <p>
-                    当前情景：<strong>{presetLabel}</strong>
-                  </p>
+                  <p>当前假设：<strong>{presetLabel}</strong></p>
                 </div>
-
                 <div className="transmission">
-                  <span className="eyebrow">核心传导链</span>
+                  <span className="eyebrow">假设传导链</span>
                   <div className="chain-row">
-                    <div>
-                      <b>海峡通航</b>
-                      <span>-{Math.round(hormuz * 0.7)}%</span>
-                    </div>
+                    <div><b>海峡通航</b><span>{100 - hormuz}%</span></div>
                     <i>→</i>
-                    <div>
-                      <b>Brent冲击</b>
-                      <span>+{oilShock}%</span>
-                    </div>
+                    <div><b>油价压力</b><span>{oilPressure}/100</span></div>
                     <i>→</i>
-                    <div>
-                      <b>通胀预期</b>
-                      <span>+{inflationShock}pp</span>
-                    </div>
+                    <div><b>成本冲击</b><span>需验证</span></div>
                     <i>→</i>
-                    <div>
-                      <b>A股风险偏好</b>
-                      <span>-{(riskScore * 0.045).toFixed(1)}%</span>
-                    </div>
+                    <div><b>A股映射</b><span>按个股研究</span></div>
                   </div>
                   <div className="signal-strip">
-                    <div>
-                      <span>方向可信度</span>
-                      <strong>{Math.round(59 + riskScore * 0.26)}%</strong>
-                    </div>
-                    <div>
-                      <span>影响窗口</span>
-                      <strong>{duration}–{duration + 3}周</strong>
-                    </div>
-                    <div>
-                      <span>主要矛盾</span>
-                      <strong>能源供给</strong>
-                    </div>
+                    <div><span>假设性质</span><strong>主观参数</strong></div>
+                    <div><span>影响窗口</span><strong>{duration} 周</strong></div>
+                    <div><span>验证变量</span><strong>油价 / 运价</strong></div>
                   </div>
                 </div>
               </div>
-
               <div className="event-footer">
-                <span>先行指标</span>
-                <button>油轮AIS ↓</button>
-                <button>Brent跨期 ↑</button>
-                <button>战争险费率 ↑</button>
-                <button>美元指数 ↑</button>
+                <span>提示</span>
+                <button>这部分不是预测</button>
+                <button>不会改写真实行情</button>
+                <button>需用新闻与原油数据复核</button>
               </div>
             </article>
 
@@ -498,175 +636,106 @@ export default function Home() {
               <div className="card-heading compact">
                 <div>
                   <span className="section-index">02</span>
-                  <div>
-                    <span className="eyebrow">情景控制台</span>
-                    <h2>调整假设</h2>
-                  </div>
+                  <div><span className="eyebrow">情景控制台</span><h2>调整研究假设</h2></div>
                 </div>
-                <span className="unsaved">动态</span>
               </div>
-
               <div className="preset-tabs">
                 {Object.entries(PRESETS).map(([key, value]) => (
                   <button
                     key={key}
                     className={activePreset === key ? "active" : ""}
-                    onClick={() =>
-                      applyPreset(key as keyof typeof PRESETS)
-                    }
+                    onClick={() => applyPreset(key as keyof typeof PRESETS)}
                   >
                     {value.label}
                   </button>
                 ))}
               </div>
-
-              <label className="slider-field">
-                <span>
-                  冲突强度 <b>{conflict}</b>
-                </span>
-                <input
-                  type="range"
-                  min="10"
-                  max="100"
-                  value={conflict}
-                  onChange={(event) => {
-                    setConflict(Number(event.target.value));
-                    setActivePreset("");
-                  }}
-                />
-                <i style={{ width: `${conflict}%` }} />
-              </label>
-
-              <label className="slider-field">
-                <span>
-                  海峡受阻比例 <b>{hormuz}%</b>
-                </span>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={hormuz}
-                  onChange={(event) => {
-                    setHormuz(Number(event.target.value));
-                    setActivePreset("");
-                  }}
-                />
-                <i style={{ width: `${hormuz}%` }} />
-              </label>
-
-              <label className="slider-field">
-                <span>
-                  冲击持续时间 <b>{duration}周</b>
-                </span>
-                <input
-                  type="range"
-                  min="1"
-                  max="12"
-                  value={duration}
-                  onChange={(event) => {
-                    setDuration(Number(event.target.value));
-                    setActivePreset("");
-                  }}
-                />
-                <i style={{ width: `${(duration / 12) * 100}%` }} />
-              </label>
-
+              {[
+                ["冲突强度", conflict, setConflict, 100, ""],
+                ["海峡受阻比例", hormuz, setHormuz, 100, "%"],
+                ["冲击持续时间", duration, setDuration, 12, "周"],
+              ].map(([label, value, setter, max, suffix]) => (
+                <label className="slider-field" key={String(label)}>
+                  <span>{label as string} <b>{value as number}{suffix as string}</b></span>
+                  <input
+                    type="range"
+                    min="1"
+                    max={max as number}
+                    value={value as number}
+                    onChange={(event) => {
+                      (setter as (value: number) => void)(Number(event.target.value));
+                      setActivePreset("");
+                    }}
+                  />
+                  <i style={{ width: `${((value as number) / (max as number)) * 100}%` }} />
+                </label>
+              ))}
               <div className="derived-impact">
-                <span>模型推导</span>
-                <div>
-                  <strong>+{oilShock}%</strong>
-                  <small>Brent压力值</small>
-                </div>
-                <div>
-                  <strong>{riskScore}/100</strong>
-                  <small>组合风险</small>
-                </div>
+                <span>仅为假设输出</span>
+                <div><strong>{oilPressure}/100</strong><small>油价压力</small></div>
+                <div><strong>{riskScore}/100</strong><small>组合压力</small></div>
               </div>
-
-              <button className="primary-button" onClick={updateScenario}>
-                <span>↻</span>
-                重新推演并回测
+              <button
+                className="primary-button"
+                onClick={() => setNotice("情景假设已更新；行情与历史回测仍使用真实市场数据。")}
+              >
+                <span>↻</span>更新情景假设
               </button>
-              <p className="control-note">
-                每次推演均保留参数快照，便于向基金经理复盘。
-              </p>
             </aside>
           </section>
 
           <section className="macro-section" id="macro">
             <div className="section-title macro-title">
               <div>
-                <span className="eyebrow">03 / 中国宏观雷达</span>
-                <h2>把政策、信用与需求，变成可回测的行业信号。</h2>
+                <span className="eyebrow">03 / 中国宏观公开数据</span>
+                <h2>只展示已发布指标，不填造空缺值。</h2>
               </div>
-              <span>模拟信号 · 正式接数后保留首次发布日期与修订值</span>
+              <span>
+                {macro
+                  ? `快照生成 ${formatDateTime(macro.generatedAt)}`
+                  : "宏观快照加载中"}
+              </span>
             </div>
-
             <div className="macro-shell">
-              <div className="macro-summary">
+              <div className="macro-summary real-macro-summary">
                 <div>
-                  <span className="eyebrow">当前宏观状态</span>
-                  <strong>{macro.label}</strong>
-                  <p>{macro.summary}</p>
+                  <span className="eyebrow">数据口径</span>
+                  <strong>官方发布频率</strong>
+                  <p>{macro?.provider ?? "正在读取公开宏观数据快照…"}</p>
                 </div>
-                <div
-                  className="macro-gauge"
-                  style={{
-                    background: `conic-gradient(#a9d67a ${macroScore * 3.6}deg, rgba(255,255,255,.12) 0deg)`,
-                  }}
-                >
-                  <div>
-                    <b>{macroScore}</b>
-                    <span>综合脉冲</span>
-                  </div>
+                <div className="source-status">
+                  <b>{macro?.metrics.length ?? "--"}</b>
+                  <span>已接入指标</span>
                 </div>
-                <div className="macro-presets" aria-label="宏观情景选择">
-                  {Object.entries(MACRO_PRESETS).map(([key, value]) => (
-                    <button
-                      key={key}
-                      className={macroPreset === key ? "active" : ""}
-                      onClick={() => {
-                        setMacroPreset(key as keyof typeof MACRO_PRESETS);
-                        setNotice(`已切换中国宏观情景：“${value.label}”`);
-                      }}
-                    >
-                      <b>{value.label}</b>
-                      <span>{value.summary}</span>
-                    </button>
-                  ))}
+                <div className="source-explain">
+                  PMI、CPI、PPI 与货币供应量按月更新，GDP 按季更新；它们不是分钟级行情。
                 </div>
               </div>
-
               <div className="macro-factor-grid">
-                {MACRO_FACTORS.map((factor, index) => {
-                  const value = macro.factors[index];
-                  const tone =
-                    value >= 60 ? "positive" : value < 45 ? "negative" : "";
-                  return (
-                    <article className={`macro-factor ${tone}`} key={factor.name}>
-                      <div>
-                        <span>{factor.name}</span>
-                        <strong>{value}</strong>
-                      </div>
-                      <p>{factor.source}</p>
-                      <small>主要传导：{factor.direction}</small>
-                      <i>
-                        <em style={{ width: `${value}%` }} />
-                      </i>
-                    </article>
-                  );
-                })}
+                {(macro?.metrics ?? []).map((metric) => (
+                  <article className="macro-factor positive" key={metric.key}>
+                    <div>
+                      <span>{metric.name}</span>
+                      <strong>{metric.value == null ? "--" : metric.value.toFixed(1)}{metric.unit}</strong>
+                    </div>
+                    <p>报告期：{metric.period}</p>
+                    <small>{metric.description}</small>
+                    <a href={metric.source} target="_blank" rel="noreferrer">查看数据源 ↗</a>
+                  </article>
+                ))}
+                {!macro && (
+                  <div className="data-empty">正在加载宏观快照；失败时不会显示模拟数值。</div>
+                )}
               </div>
-
               <div className="macro-transmission">
-                <span>进入模型</span>
-                <div><b>宏观状态</b><small>{macro.label}</small></div>
+                <span>研究流程</span>
+                <div><b>官方发布</b><small>保留报告期</small></div>
                 <i>→</i>
-                <div><b>行业敏感度</b><small>地产 / 消费 / 科技 / 周期</small></div>
+                <div><b>公开数据快照</b><small>部署任务定时更新</small></div>
                 <i>→</i>
-                <div><b>个股盈利暴露</b><small>收入、成本与估值三层校验</small></div>
+                <div><b>研究员解释</b><small>不自动生成买卖信号</small></div>
                 <i>→</i>
-                <div><b>组合约束</b><small>仓位、集中度与回撤门禁</small></div>
+                <div><b>组合约束</b><small>人工决策与复核</small></div>
               </div>
             </div>
           </section>
@@ -674,32 +743,29 @@ export default function Home() {
           <section className="impact-section">
             <div className="section-title">
               <div>
-                <span className="eyebrow">行业映射 / SECTOR MAP</span>
-                <h2>冲击不是一条直线，而是一组利润再分配。</h2>
+                <span className="eyebrow">情景敏感度 / RESEARCH ASSUMPTION</span>
+                <h2>事件 β 是研究假设，不是实时数据。</h2>
               </div>
-              <span>基于当前情景 · 预估20交易日超额收益</span>
+              <span>用于提出问题，不作为收益预测</span>
             </div>
             <div className="heatmap">
               {[
-                ["油气开采", 0.32, "positive"],
-                ["油服工程", 0.24, "positive"],
-                ["贵金属", 0.13, "positive"],
-                ["煤炭", 0.09, "positive"],
-                ["炼化", 0.03, "neutral"],
-                ["电力", -0.05, "neutral"],
-                ["物流", -0.15, "negative"],
-                ["基础化工", -0.22, "negative"],
-                ["航空机场", -0.34, "negative"],
-              ].map(([name, beta, tone]) => {
-                const value = Number(beta) * oilShock * 0.42;
+                ["油气开采", 0.32],
+                ["油服工程", 0.24],
+                ["贵金属", 0.13],
+                ["煤炭", 0.09],
+                ["炼化", 0.03],
+                ["电力", -0.05],
+                ["物流", -0.15],
+                ["基础化工", -0.22],
+                ["航空机场", -0.34],
+              ].map(([name, beta]) => {
+                const value = Number(beta);
                 return (
-                  <div className={`heat-cell ${tone}`} key={String(name)}>
+                  <div className={`heat-cell ${value > 0.08 ? "positive" : value < -0.08 ? "negative" : "neutral"}`} key={String(name)}>
                     <span>{name}</span>
-                    <strong>
-                      {value > 0 ? "+" : ""}
-                      {value.toFixed(1)}%
-                    </strong>
-                    <small>事件β {Number(beta).toFixed(2)}</small>
+                    <strong>{value > 0 ? "+" : ""}{value.toFixed(2)}</strong>
+                    <small>假设事件 β</small>
                   </div>
                 );
               })}
@@ -710,8 +776,8 @@ export default function Home() {
             <div className="stock-table-card">
               <div className="section-title table-title">
                 <div>
-                  <span className="eyebrow">04 / 选股工作台</span>
-                  <h2>候选股评分与证据</h2>
+                  <span className="eyebrow">04 / 真实行情选股台</span>
+                  <h2>最新价、估值与价格动量</h2>
                 </div>
                 <div className="table-actions">
                   <label>
@@ -722,16 +788,10 @@ export default function Home() {
                       placeholder="代码 / 名称 / 行业"
                     />
                   </label>
-                  <button>筛选器 <b>3</b></button>
                 </div>
               </div>
-
               <div className="chain-filter">
-                {[
-                  ["all", "全市场"],
-                  ["benefit", "受益链"],
-                  ["stress", "承压链"],
-                ].map(([key, label]) => (
+                {[["all", "全部"], ["benefit", "假设受益链"], ["stress", "假设承压链"]].map(([key, label]) => (
                   <button
                     key={key}
                     className={chain === key ? "active" : ""}
@@ -740,134 +800,85 @@ export default function Home() {
                     {label}
                   </button>
                 ))}
-                <span>模型综合：基本面 30% · 估值 15% · 动量 15% · 事件 20% · 中国宏观 20%</span>
+                <span>默认按当日涨跌幅排序 · 20 秒刷新公开最新价</span>
               </div>
-
               <div className="stock-table" role="table" aria-label="候选股票">
-                <div className="stock-row table-head" role="row">
-                  <span>加入</span>
-                  <span>公司 / 行业</span>
-                  <span>综合分</span>
-                  <span>质量</span>
-                  <span>估值</span>
-                  <span>动量</span>
-                  <span>事件β</span>
-                  <span>信号</span>
+                <div className="stock-row live-stock-row table-head" role="row">
+                  <span>加入</span><span>公司 / 行业</span><span>最新价</span>
+                  <span>涨跌幅</span><span>换手率</span><span>PE(TTM)</span>
+                  <span>PB</span><span>20日动量</span>
                 </div>
-                {filteredStocks.map((stock, index) => (
-                  <button
-                    className={
-                      focused === stock.ticker
-                        ? "stock-row focused"
-                        : "stock-row"
-                    }
-                    key={stock.ticker}
-                    onClick={() => setFocused(stock.ticker)}
-                    role="row"
-                  >
-                    <span
-                      className={
-                        selected.includes(stock.ticker)
-                          ? "check checked"
-                          : "check"
-                      }
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggleStock(stock.ticker);
-                      }}
+                {filteredStocks.map((stock) => {
+                  const quote = quotes[stock.ticker];
+                  const momentum = momentum20(histories[stock.ticker]);
+                  return (
+                    <button
+                      className={`stock-row live-stock-row ${focused === stock.ticker ? "focused" : ""}`}
+                      key={stock.ticker}
+                      onClick={() => setFocused(stock.ticker)}
+                      role="row"
                     >
-                      {selected.includes(stock.ticker) ? "✓" : ""}
-                    </span>
-                    <span className="stock-name">
-                      <b>
-                        {index + 1}. {stock.name}
-                      </b>
-                      <small>
-                        {stock.ticker} · {stock.sector}
-                      </small>
-                    </span>
-                    <span className="score-value">{stock.score}</span>
-                    <span>{stock.quality}</span>
-                    <span>{stock.valuation}</span>
-                    <span>{stock.momentum}</span>
-                    <span
-                      className={
-                        stock.eventBeta > 0
-                          ? "positive-text"
-                          : "negative-text"
-                      }
-                    >
-                      {stock.eventBeta > 0 ? "+" : ""}
-                      {stock.eventBeta.toFixed(2)}
-                    </span>
-                    <span
-                      className={
-                        stock.score >= 75
-                          ? "signal buy"
-                          : stock.score < 55
-                            ? "signal avoid"
-                            : "signal watch"
-                      }
-                    >
-                      {stock.score >= 75
-                        ? "重点"
-                        : stock.score < 55
-                          ? "规避"
-                          : "观察"}
-                    </span>
-                  </button>
-                ))}
+                      <span
+                        className={selected.includes(stock.ticker) ? "check checked" : "check"}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleStock(stock.ticker);
+                        }}
+                      >
+                        {selected.includes(stock.ticker) ? "✓" : ""}
+                      </span>
+                      <span className="stock-name">
+                        <b>{stock.name}</b>
+                        <small>{stock.ticker} · {stock.sector}</small>
+                      </span>
+                      <span className="quote-price">{numberText(quote?.price)}</span>
+                      <span className={(quote?.changePct ?? 0) >= 0 ? "positive-text" : "negative-text"}>
+                        {percent(quote?.changePct)}
+                      </span>
+                      <span>{percent(quote?.turnover)}</span>
+                      <span>{numberText(quote?.pe)}</span>
+                      <span>{numberText(quote?.pb)}</span>
+                      <span className={(momentum ?? 0) >= 0 ? "positive-text" : "negative-text"}>
+                        {percent(momentum)}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
               <div className="table-foot">
-                <span>显示 {filteredStocks.length} / {STOCKS.length} 只演示标的</span>
-                <span>分数仅用于研究流程演示，不构成投资建议</span>
+                <span>行情：东方财富公开接口 · {quoteStatus === "live" ? formatDateTime(quoteUpdatedAt) : "等待连接"}</span>
+                <span>非交易所授权逐笔行情，可能延迟、中断或调整口径</span>
               </div>
             </div>
 
             <aside className="stock-detail">
-              <div className="detail-header">
+              <div className="detail-header real-detail-header">
                 <div>
                   <span>{focusedStock.ticker}</span>
                   <h3>{focusedStock.name}</h3>
-                  <p>{focusedStock.sector} · 事件敏感型</p>
+                  <p>{focusedStock.sector} · 公开最新价</p>
                 </div>
-                <strong>{focusedStock.score}</strong>
+                <strong>{numberText(focusedQuote?.price)}</strong>
+              </div>
+              <div className="live-detail-grid">
+                <div><span>涨跌幅</span><b className={(focusedQuote?.changePct ?? 0) >= 0 ? "positive-text" : "negative-text"}>{percent(focusedQuote?.changePct)}</b></div>
+                <div><span>今开</span><b>{numberText(focusedQuote?.open)}</b></div>
+                <div><span>最高</span><b>{numberText(focusedQuote?.high)}</b></div>
+                <div><span>最低</span><b>{numberText(focusedQuote?.low)}</b></div>
+                <div><span>PE(TTM)</span><b>{numberText(focusedQuote?.pe)}</b></div>
+                <div><span>PB</span><b>{numberText(focusedQuote?.pb)}</b></div>
+                <div><span>换手率</span><b>{percent(focusedQuote?.turnover)}</b></div>
+                <div><span>20日动量</span><b>{percent(focusedMomentum)}</b></div>
               </div>
               <div className="evidence-block">
-                <span className="eyebrow">入选逻辑</span>
+                <span className="eyebrow">研究假设</span>
                 <p>{focusedStock.thesis}</p>
               </div>
-              <div className="factor-bars">
-                {[
-                  ["基本面质量", focusedStock.quality],
-                  ["估值吸引力", focusedStock.valuation],
-                  ["价格动量", focusedStock.momentum],
-                  [
-                    "事件适配度",
-                    Math.round(clamp(50 + focusedStock.eventBeta * oilShock)),
-                  ],
-                ].map(([label, value]) => (
-                  <div key={String(label)}>
-                    <span>
-                      {label} <b>{value}</b>
-                    </span>
-                    <i>
-                      <em style={{ width: `${value}%` }} />
-                    </i>
-                  </div>
-                ))}
-              </div>
               <div className="risk-box">
-                <span>反方证据</span>
-                <p>{focusedStock.risk}</p>
+                <span>反方条件</span><p>{focusedStock.risk}</p>
               </div>
-              <button
-                className="detail-button"
-                onClick={() => toggleStock(focusedStock.ticker)}
-              >
-                {selected.includes(focusedStock.ticker)
-                  ? "✓ 已加入观察组合"
-                  : "+ 加入观察组合"}
+              <button className="detail-button" onClick={() => toggleStock(focusedStock.ticker)}>
+                {selected.includes(focusedStock.ticker) ? "✓ 已加入观察组合" : "+ 加入观察组合"}
               </button>
             </aside>
           </section>
@@ -875,125 +886,59 @@ export default function Home() {
           <section className="backtest-section" id="backtest">
             <div className="section-title">
               <div>
-                <span className="eyebrow">04 / 回测实验室</span>
-                <h2>先看回撤，再看收益。</h2>
+                <span className="eyebrow">05 / 真实历史价格回测</span>
+                <h2>等权买入持有，先看真实基线。</h2>
               </div>
-              <div className="backtest-settings">
-                <label>
-                  回测区间
-                  <select defaultValue="3y">
-                    <option value="3y">近3年</option>
-                    <option value="5y">近5年</option>
-                  </select>
-                </label>
-                <label>
-                  调仓频率
-                  <select defaultValue="20">
-                    <option value="20">20交易日</option>
-                    <option value="5">5交易日</option>
-                  </select>
-                </label>
-                <label>
-                  单边成本
-                  <select defaultValue="8">
-                    <option value="8">8 bps</option>
-                    <option value="12">12 bps</option>
-                  </select>
-                </label>
-              </div>
+              <span>
+                {backtest
+                  ? `${backtest.start} 至 ${backtest.end} · ${backtest.observations} 个交易日`
+                  : historyStatus === "error" ? "历史数据加载失败" : "正在计算"}
+              </span>
             </div>
-
             <div className="backtest-grid">
               <article className="performance-card">
                 <div className="metric-grid">
-                  <div>
-                    <span>年化净收益</span>
-                    <strong className="positive-text">+{annualReturn}%</strong>
-                    <small>已扣费用与冲击成本</small>
-                  </div>
-                  <div>
-                    <span>基准年化</span>
-                    <strong>+{benchmarkReturn}%</strong>
-                    <small>中证800模拟基准</small>
-                  </div>
-                  <div>
-                    <span>最大回撤</span>
-                    <strong className="negative-text">-{drawdown}%</strong>
-                    <small>风险预算上限 -12%</small>
-                  </div>
-                  <div>
-                    <span>夏普比率</span>
-                    <strong>{sharpe}</strong>
-                    <small>无风险利率 2.0%</small>
-                  </div>
+                  <div><span>组合年化</span><strong className={(backtest?.annualized ?? 0) >= 0 ? "positive-text" : "negative-text"}>{percent(backtest?.annualized)}</strong><small>观察池等权买入持有</small></div>
+                  <div><span>中证800年化</span><strong>{percent(backtest?.benchmarkAnnualized)}</strong><small>指数前复权日线</small></div>
+                  <div><span>最大回撤</span><strong className="negative-text">{backtest ? `-${backtest.maxDrawdown.toFixed(2)}%` : "--"}</strong><small>组合净值峰谷跌幅</small></div>
+                  <div><span>夏普比率</span><strong>{backtest ? backtest.sharpe.toFixed(2) : "--"}</strong><small>无风险利率假设 2.0%</small></div>
                 </div>
-
                 <div className="chart-header">
-                  <div>
-                    <button className="active">累计净值</button>
-                    <button>回撤</button>
-                    <button>超额收益</button>
-                  </div>
+                  <div><button className="active">累计净值</button></div>
                   <div className="legend">
-                    <span><i className="strategy-line" />情景策略</span>
+                    <span><i className="strategy-line" />观察组合</span>
                     <span><i className="benchmark-line" />中证800</span>
                   </div>
                 </div>
-                <div className="performance-chart" aria-label="累计净值示意图">
-                  <div className="grid-line g1"><span>1.40</span></div>
-                  <div className="grid-line g2"><span>1.20</span></div>
-                  <div className="grid-line g3"><span>1.00</span></div>
-                  <div
-                    className="area strategy-area"
-                    style={{
-                      clipPath: `polygon(0% 88%, 8% 82%, 16% 84%, 24% 70%, 32% 74%, 40% 61%, 48% 65%, 56% ${Math.max(34, 62 - oilShock * 0.3)}%, 64% 47%, 72% 52%, 80% 34%, 88% 39%, 96% 16%, 100% 18%, 100% 100%, 0 100%)`,
-                    }}
-                  />
-                  <div
-                    className="area benchmark-area"
-                    style={{
-                      clipPath:
-                        "polygon(0% 88%, 8% 86%, 16% 78%, 24% 80%, 32% 70%, 40% 73%, 48% 62%, 56% 67%, 64% 59%, 72% 55%, 80% 60%, 88% 49%, 96% 46%, 100% 43%, 100% 100%, 0 100%)",
-                    }}
-                  />
-                  <div className="event-marker">
-                    <i />
-                    <span>美伊冲突</span>
-                  </div>
+                <div className="performance-chart" aria-label="真实历史累计净值">
+                  <div className="grid-line g1"><span>相对高位</span></div>
+                  <div className="grid-line g2"><span>区间中位</span></div>
+                  <div className="grid-line g3"><span>相对低位</span></div>
+                  {backtest && (
+                    <>
+                      <div className="area strategy-area" style={{ clipPath: backtest.strategyPolygon }} />
+                      <div className="area benchmark-area" style={{ clipPath: backtest.benchmarkPolygon }} />
+                    </>
+                  )}
                   <div className="x-axis">
-                    <span>2023</span><span>2024</span><span>2025</span><span>2026</span>
+                    <span>{backtest?.start ?? "--"}</span><span>真实前复权收盘价</span><span>{backtest?.end ?? "--"}</span>
                   </div>
                 </div>
               </article>
-
               <aside className="diagnostics-card">
-                <span className="eyebrow">回测诊断</span>
-                <h3>结果可信度 <strong>74</strong><small>/100</small></h3>
-                <div className="confidence-track"><i style={{ width: "74%" }} /></div>
+                <span className="eyebrow">回测口径</span>
+                <h3>透明基线 <strong>{backtest ? "可复算" : "--"}</strong></h3>
                 <div className="diagnostic-list">
-                  <div className="pass">
-                    <span>✓</span>
-                    <p><b>样本外验证</b><small>滚动窗口，无未来数据</small></p>
-                  </div>
-                  <div className="pass">
-                    <span>✓</span>
-                    <p><b>交易成本</b><small>费率与冲击成本已计入</small></p>
-                  </div>
-                  <div className="warn">
-                    <span>!</span>
-                    <p><b>同类事件偏少</b><small>地缘冲突样本仅 7 组</small></p>
-                  </div>
-                  <div className="warn">
-                    <span>!</span>
-                    <p><b>参数敏感</b><small>油价半衰期影响较大</small></p>
-                  </div>
+                  <div className="pass"><span>✓</span><p><b>真实历史价格</b><small>公开接口前复权日线</small></p></div>
+                  <div className="pass"><span>✓</span><p><b>无选股打分造数</b><small>只按用户勾选标的等权</small></p></div>
+                  <div className="warn"><span>!</span><p><b>非样本外策略</b><small>这是买入持有基线，不代表可复制收益</small></p></div>
+                  <div className="warn"><span>!</span><p><b>暂未计交易摩擦</b><small>未计税费、滑点与涨跌停约束</small></p></div>
                 </div>
                 <div className="cost-box">
-                  <span>收益损耗</span>
-                  <strong>-2.3%</strong>
-                  <small>换手 1.5% · 费用 0.5% · 滑点 0.3%</small>
+                  <span>数据范围</span>
+                  <strong>{selected.length} 只股票</strong>
+                  <small>选择变化后自动重算 · 不影响真实行情</small>
                 </div>
-                <button onClick={updateScenario}>运行稳健性检验 →</button>
               </aside>
             </div>
           </section>
@@ -1001,81 +946,33 @@ export default function Home() {
           <section className="autonomy-section" id="autonomy">
             <div className="section-title">
               <div>
-                <span className="eyebrow">06 / 自主学习中心</span>
-                <h2>模型可以自己竞争，但不能绕过风险门禁。</h2>
+                <span className="eyebrow">06 / 数据管线状态</span>
+                <h2>先把数据做真，再谈自主学习。</h2>
               </div>
-              <button className="training-button" onClick={runTraining}>
-                ↻ 运行第 {trainingCycle + 1} 轮训练
-              </button>
+              <span className="pipeline-time">页面端行情每 20 秒刷新</span>
             </div>
-
-            <div className="model-arena">
-              <article className="champion-card">
-                <div className="model-card-head">
-                  <span className="model-badge champion">正式冠军</span>
-                  <small>已上线 · 仅模拟组合</small>
-                </div>
-                <h3>多因子稳健模型 <span>v3.2</span></h3>
-                <p>质量、估值、动量与行业中性约束，作为当前基准策略。</p>
-                <div className="model-metrics">
-                  <div><span>样本外夏普</span><b>1.36</b></div>
-                  <div><span>最大回撤</span><b>-9.4%</b></div>
-                  <div><span>月均换手</span><b>18%</b></div>
-                </div>
+            <div className="model-arena pipeline-arena">
+              <article>
+                <div className="model-card-head"><span className="model-badge champion">已启用</span><small>浏览器直连</small></div>
+                <h3>公开最新行情</h3>
+                <p>最新价、涨跌幅、换手率、PE 与 PB。接口失败时显示空值，不回退到模拟数。</p>
+                <div className="model-metrics"><div><span>状态</span><b>{quoteStatus === "live" ? "正常" : quoteStatus === "error" ? "异常" : "连接中"}</b></div><div><span>标的</span><b>{Object.keys(quotes).length}</b></div><div><span>刷新</span><b>20秒</b></div></div>
               </article>
-
-              <article className="challenger-card">
-                <div className="model-card-head">
-                  <span className="model-badge challenger">挑战者</span>
-                  <small>训练轮次 #{trainingCycle}</small>
-                </div>
-                <h3>宏观 × 事件融合模型 <span>v1.7</span></h3>
-                <p>新增中国宏观六维信号，并与黑天鹅事件、行业敏感度联合学习。</p>
-                <div className="model-metrics">
-                  <div><span>样本外夏普</span><b>1.44</b></div>
-                  <div><span>最大回撤</span><b>-10.1%</b></div>
-                  <div><span>稳定窗口</span><b>7 / 9</b></div>
-                </div>
+              <article>
+                <div className="model-card-head"><span className="model-badge champion">已启用</span><small>前复权日线</small></div>
+                <h3>历史价格与回测</h3>
+                <p>免费公开日线用于价格动量与等权基线回测，结果随观察池实时重算。</p>
+                <div className="model-metrics"><div><span>状态</span><b>{historyStatus === "live" ? "正常" : historyStatus === "error" ? "异常" : "加载中"}</b></div><div><span>股票</span><b>{Object.keys(histories).length}</b></div><div><span>基准</span><b>中证800</b></div></div>
               </article>
-
-              <article className="shadow-card">
-                <div className="model-card-head">
-                  <span className="model-badge shadow">影子观察</span>
-                  <small>不产生真实指令</small>
-                </div>
-                <h3>事件文本模型 <span>v0.9</span></h3>
-                <p>只负责把政策、财报与突发新闻转成结构化特征，不单独决定买卖。</p>
-                <div className="model-metrics">
-                  <div><span>事件召回率</span><b>86%</b></div>
-                  <div><span>方向准确率</span><b>62%</b></div>
-                  <div><span>待观察</span><b>18日</b></div>
-                </div>
+              <article>
+                <div className="model-card-head"><span className="model-badge shadow">未启用</span><small>需要后端</small></div>
+                <h3>模型训练与自动换模</h3>
+                <p>GitHub Pages 只有前端，尚无特征库、训练任务、模型注册表或影子组合，因此不宣称自主学习。</p>
+                <div className="model-metrics"><div><span>训练</span><b>关闭</b></div><div><span>自动下单</span><b>禁止</b></div><div><span>人工复核</span><b>必需</b></div></div>
               </article>
             </div>
-
-            <div className="promotion-gate">
-              <div>
-                <span className="eyebrow">冠军晋级门槛</span>
-                <strong>挑战者尚未晋级</strong>
-                <p>收益质量有所改善，但最大回撤仍高于正式模型。</p>
-              </div>
-              {[
-                ["滚动样本外验证", "通过", "pass"],
-                ["交易成本与涨跌停", "通过", "pass"],
-                ["多市场状态稳定性", "观察", "watch"],
-                ["20日影子组合", "未完成", "pending"],
-                ["基金经理人工批准", "必需", "locked"],
-              ].map(([name, status, tone]) => (
-                <div className={`gate-item ${tone}`} key={name}>
-                  <i>{tone === "pass" ? "✓" : tone === "locked" ? "⌁" : "·"}</i>
-                  <span>{name}</span>
-                  <b>{status}</b>
-                </div>
-              ))}
-            </div>
-
             <p className="autonomy-note">
-              数据按首次可得时间入库；任何修订值都保留版本。模型不会自动下单，也不能自行修改仓位、回撤和流动性上限。
+              下一阶段若接入数据库与定时计算，应保留原始数据版本、首次可得时间、样本外验证和人工晋级门槛。
             </p>
           </section>
 
@@ -1083,80 +980,25 @@ export default function Home() {
             <div className="learning-copy">
               <span className="eyebrow">07 / 投研学习中心</span>
               <h2>每一个结论，都要能讲清楚“为什么”。</h2>
-              <p>
-                平台把本次推演拆成概念、公式、证据与反例。你可以用它准备晨会，也可以用它训练自己的研究框架。
-              </p>
+              <p>平台把事实、假设、回测口径与反例拆开，方便准备晨会与训练研究框架。</p>
               <div className="lesson-tabs">
                 {["传导链", "因子词典", "回测陷阱"].map((item) => (
-                  <button
-                    key={item}
-                    className={lesson === item ? "active" : ""}
-                    onClick={() => setLesson(item)}
-                  >
-                    {item}
-                  </button>
+                  <button key={item} className={lesson === item ? "active" : ""} onClick={() => setLesson(item)}>{item}</button>
                 ))}
               </div>
             </div>
             <article className="lesson-card">
               <div className="lesson-number">07</div>
-              {lesson === "传导链" && (
-                <>
-                  <span>今日微课 · 6分钟</span>
-                  <h3>为什么油价上涨，不等于黄金一定上涨？</h3>
-                  <p>
-                    地缘风险推高避险需求，但油价也可能抬升通胀与实际利率。当美元和美债收益率同步走高时，黄金的避险属性会被持有成本抵消。
-                  </p>
-                  <div className="lesson-formula">
-                    黄金方向 ≈ 避险需求 − 实际利率压力 − 美元强度
-                  </div>
-                </>
-              )}
-              {lesson === "因子词典" && (
-                <>
-                  <span>核心概念 · 4分钟</span>
-                  <h3>事件β不是相关系数，而是条件敏感度。</h3>
-                  <p>
-                    它衡量某只股票在特定事件与市场状态下，对冲击变量变化的相对反应。事件改变，β也应该重新估计。
-                  </p>
-                  <div className="lesson-formula">
-                    事件β = 条件超额收益 ÷ 标准化冲击幅度
-                  </div>
-                </>
-              )}
-              {lesson === "回测陷阱" && (
-                <>
-                  <span>研究规范 · 8分钟</span>
-                  <h3>漂亮的历史曲线，可能来自未来函数。</h3>
-                  <p>
-                    财报披露延迟、退市样本缺失、参数反复试验与忽略涨跌停，都可能让回测显著高估真实收益。
-                  </p>
-                  <div className="lesson-formula">
-                    可实现收益 = 毛收益 − 费用 − 滑点 − 冲击 − 偏差
-                  </div>
-                </>
-              )}
-              <button>开始学习 <span>→</span></button>
+              {lesson === "传导链" && <><span>今日微课 · 6分钟</span><h3>为什么油价上涨，不等于黄金一定上涨？</h3><p>地缘风险推高避险需求，但油价也可能抬升通胀与实际利率。当美元和美债收益率同步走高时，黄金的避险属性会被持有成本抵消。</p><div className="lesson-formula">黄金方向 ≈ 避险需求 − 实际利率压力 − 美元强度</div></>}
+              {lesson === "因子词典" && <><span>核心概念 · 4分钟</span><h3>事件 β 不是实时事实，而是条件敏感度假设。</h3><p>它要用同类历史样本估计，并经过显著性、稳定性与样本外检验；事件改变后也应重新估计。</p><div className="lesson-formula">事件 β = 条件超额收益 ÷ 标准化冲击幅度</div></>}
+              {lesson === "回测陷阱" && <><span>研究规范 · 8分钟</span><h3>真实价格，不代表回测天然可信。</h3><p>幸存者偏差、参数反复试验、忽略交易成本与直接用修订后宏观数据，都可能高估结果。</p><div className="lesson-formula">可实现收益 = 毛收益 − 费用 − 滑点 − 冲击 − 偏差</div></>}
             </article>
             <div className="checklist-card">
-              <span className="eyebrow">提交前检查</span>
-              <h3>晨会研究清单</h3>
-              {[
-                "原始事实与主观假设已分开",
-                "至少保留一个反方情景",
-                "个股盈利传导可以解释",
-                "回测已计入交易摩擦",
-                "结论注明失效条件",
-              ].map((item, index) => (
-                <label key={item}>
-                  <input type="checkbox" defaultChecked={index < 3} />
-                  <span>{item}</span>
-                </label>
+              <span className="eyebrow">提交前检查</span><h3>晨会研究清单</h3>
+              {["原始事实与主观假设已分开", "记录数据来源与报告期", "至少保留一个反方情景", "回测口径可以复算", "结论注明失效条件"].map((item) => (
+                <label key={item}><input type="checkbox" /><span>{item}</span></label>
               ))}
-              <div>
-                <strong>3 / 5</strong>
-                <span>完成后再导出研究简报</span>
-              </div>
+              <div><strong>0 / 5</strong><span>完成后再导出研究简报</span></div>
             </div>
           </section>
 
@@ -1164,11 +1006,11 @@ export default function Home() {
             <div>
               <span className="brand-mark small">砺</span>
               <p>
-                砺石情景研究终端 · 让假设可检验，让风险被看见。
-                <small>本页面使用模拟数据，仅用于研究与学习，不构成投资建议。</small>
+                砺石情景研究终端 · 公开数据版
+                <small>行情来自免费公开接口，可能延迟或中断；宏观数据按官方发布频率更新；情景推演为研究假设，不构成投资建议。</small>
               </p>
             </div>
-            <span>版本 0.1 · 研究沙盒</span>
+            <span>版本 0.2 · 只读研究</span>
           </footer>
         </div>
       </section>

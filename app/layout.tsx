@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "砺石情景研究终端",
   description:
-    "融合中国宏观、黑天鹅事件、A股筛选、组合回测与冠军挑战者自主学习机制的投研平台。",
+    "使用免费公开行情、历史价格与中国宏观数据的只读投研平台，主观情景与真实数据分开展示。",
 };
 
 export default function RootLayout({

@@ -1,0 +1,60 @@
+{
+  "generatedAt": "2026-08-02T06:39:11.755Z",
+  "provider": "指标原始口径来自国家统计局、中国人民银行；本页通过东方财富公开数据接口生成只读快照。",
+  "metrics": [
+    {
+      "key": "manufacturing-pmi",
+      "name": "制造业 PMI",
+      "value": 49.2,
+      "unit": "",
+      "period": "2026-07",
+      "description": "50 为扩张与收缩分界，按月公布。",
+      "source": "https://data.stats.gov.cn/easyquery.htm?cn=A01"
+    },
+    {
+      "key": "non-manufacturing-pmi",
+      "name": "非制造业 PMI",
+      "value": 49,
+      "unit": "",
+      "period": "2026-07",
+      "description": "反映服务业和建筑业商务活动。",
+      "source": "https://data.stats.gov.cn/easyquery.htm?cn=A01"
+    },
+    {
+      "key": "cpi-yoy",
+      "name": "CPI 同比",
+      "value": 1,
+      "unit": "%",
+      "period": "2026-06",
+      "description": "全国居民消费价格同比变化。",
+      "source": "https://data.stats.gov.cn/easyquery.htm?cn=A01"
+    },
+    {
+      "key": "ppi-yoy",
+      "name": "PPI 同比",
+      "value": 4.1,
+      "unit": "%",
+      "period": "2026-06",
+      "description": "工业生产者出厂价格同比变化。",
+      "source": "https://data.stats.gov.cn/easyquery.htm?cn=A01"
+    },
+    {
+      "key": "gdp-yoy",
+      "name": "GDP 累计同比",
+      "value": 4.7,
+      "unit": "%",
+      "period": "2026-第1-2季度",
+      "description": "国内生产总值累计同比增速，按季公布。",
+      "source": "https://data.stats.gov.cn/easyquery.htm?cn=A01"
+    },
+    {
+      "key": "m2-yoy",
+      "name": "广义货币同比",
+      "value": 8,
+      "unit": "%",
+      "period": "2026-06",
+      "description": "广义货币供应量 M2 同比增速。",
+      "source": "https://www.pbc.gov.cn/diaochatongjisi/116219/index.html"
+    }
+  ]
+}
